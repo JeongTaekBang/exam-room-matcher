@@ -1,0 +1,13 @@
+__pycache__/
+.pytest_cache/
+*.pyc
+*.pyo
+
+# 데이터 폴더 (엑셀 원본 + 배정/해제/감사 JSON)
+2026/
+
+# IDE
+.vscode/
+
+# Claude Code
+.claude/
