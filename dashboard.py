@@ -327,6 +327,16 @@ def build_review_queue_rows(requests: list, timetable_data: dict, room_capacity:
 
         day_timetable = timetable_data.get(sheet, {})
 
+        # NORMAL_EXAM인데 시험교시 명시 없음 + 수업 2교시 이상 → 부분해제 가능성
+        if req.category == Category.NORMAL_EXAM and req.exam_start is None:
+            if len(needed_periods) >= 2:
+                rows.append({
+                    "분류": CAT_LABELS[req.category],
+                    "과목명": req.key,
+                    "이슈": "부분해제 확인 필요",
+                    "세부": f"수업 {needed_periods}교시, 시험교시 미명시 → 수동 해제 필요",
+                })
+
         if req.category in (Category.ROOM_CHANGE, Category.ROOM_SPLIT):
             if compute_status(req, assignments, room_capacity) == "완료":
                 continue
