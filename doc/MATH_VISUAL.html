@@ -1,0 +1,654 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>강의실 배정 — 산수 비주얼 가이드</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: 'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif;
+    background: #0d1117; color: #e6edf3; padding: 40px 20px;
+    max-width: 1100px; margin: 0 auto; line-height: 1.6;
+  }
+  h1 { text-align: center; font-size: 2em; margin-bottom: 10px; color: #58a6ff; }
+  .subtitle { text-align: center; color: #8b949e; margin-bottom: 50px; font-size: 1.1em; }
+  h2 { color: #58a6ff; margin: 60px 0 20px; font-size: 1.4em;
+       border-bottom: 1px solid #30363d; padding-bottom: 8px; }
+  p { color: #c9d1d9; margin: 10px 0; }
+  .highlight { color: #ffa657; font-weight: bold; }
+  .section { margin-bottom: 60px; }
+
+  /* 격자 공통 */
+  .grid { display: inline-block; margin: 20px 0; border-collapse: collapse; }
+  .grid td, .grid th {
+    width: 72px; height: 44px; text-align: center; font-size: 12px;
+    border: 1px solid #30363d; padding: 4px;
+  }
+  .grid th { background: #161b22; color: #8b949e; font-weight: normal; font-size: 11px; }
+  .grid .room-header { background: #161b22; color: #e6edf3; font-weight: bold;
+                        text-align: left; padding-left: 8px; min-width: 80px; }
+  .grid .cap { color: #8b949e; font-size: 10px; }
+
+  /* 셀 상태 */
+  .cell-class   { background: #8B4513; color: #fff; }
+  .cell-exam    { background: #4472C4; color: #fff; }
+  .cell-free    { background: #1a1a2e; color: #484f58; }
+  .cell-released{ background: #2d1b35; color: #FF69B4; }
+  .cell-conflict{ background: #da3633; color: #fff; font-weight: bold; }
+  .cell-green   { background: #238636; color: #fff; }
+  .cell-yellow  { background: #9e6a03; color: #fff; }
+  .cell-pink    { background: #cc4466; color: #fff; }
+
+  /* 범례 */
+  .legend { display: flex; flex-wrap: wrap; gap: 16px; margin: 16px 0; }
+  .legend-item { display: flex; align-items: center; gap: 6px; font-size: 13px; }
+  .legend-box { width: 20px; height: 20px; border-radius: 3px; border: 1px solid #30363d; }
+
+  /* 화살표 영역 */
+  .arrow-flow { display: flex; align-items: center; gap: 20px; flex-wrap: wrap; margin: 20px 0; }
+  .arrow-label { font-size: 28px; color: #58a6ff; }
+  .flow-desc { color: #ffa657; font-size: 14px; font-weight: bold; }
+
+  /* 수급 테이블 */
+  .supply-table { border-collapse: collapse; margin: 20px 0; }
+  .supply-table td, .supply-table th {
+    padding: 8px 14px; border: 1px solid #30363d; text-align: center; font-size: 13px;
+  }
+  .supply-table th { background: #161b22; color: #8b949e; }
+  .supply-table .shortage { background: #da3633; color: #fff; font-weight: bold; }
+  .supply-table .ok { background: #238636; color: #fff; }
+
+  /* 분반 박스 */
+  .split-box { display: flex; align-items: center; gap: 16px; margin: 20px 0;
+               padding: 20px; border: 2px solid #30363d; border-radius: 10px; background: #161b22; }
+  .room-box { padding: 16px 24px; border-radius: 8px; text-align: center; min-width: 120px; }
+  .room-box.assigned { background: #4472C4; color: #fff; }
+  .room-box.unknown { background: #30363d; color: #8b949e; border: 2px dashed #484f58; }
+  .plus { font-size: 24px; color: #8b949e; }
+  .equals { font-size: 24px; color: #8b949e; }
+  .result-ok { color: #3fb950; font-size: 18px; font-weight: bold; }
+  .result-ng { color: #da3633; font-size: 18px; font-weight: bold; }
+
+  /* 가동률 바 */
+  .util-bar-wrap { background: #21262d; border-radius: 8px; height: 36px;
+                   margin: 10px 0; position: relative; overflow: hidden; max-width: 500px; }
+  .util-bar-fill { height: 100%; border-radius: 8px 0 0 8px; display: flex;
+                   align-items: center; justify-content: center; font-size: 13px; font-weight: bold; }
+  .util-bar-label { position: absolute; right: 10px; top: 50%; transform: translateY(-50%);
+                    font-size: 12px; color: #8b949e; }
+
+  /* 히트맵 미니 */
+  .heatmap { display: flex; gap: 8px; margin: 20px 0; }
+  .heat-cell { width: 100px; height: 70px; border-radius: 8px; display: flex;
+               flex-direction: column; align-items: center; justify-content: center;
+               font-size: 13px; font-weight: bold; }
+
+  /* 요약 박스 */
+  .summary-box { background: #161b22; border: 2px solid #58a6ff; border-radius: 12px;
+                 padding: 30px; margin: 30px 0; }
+  .summary-box ul { list-style: none; padding: 0; }
+  .summary-box li { padding: 8px 0; font-size: 15px; border-bottom: 1px solid #21262d; }
+  .summary-box li:last-child { border: none; }
+  .op { display: inline-block; width: 100px; color: #58a6ff; font-weight: bold; }
+
+  .formula { background: #161b22; border-left: 3px solid #58a6ff; padding: 12px 20px;
+             margin: 16px 0; font-family: monospace; font-size: 14px; color: #ffa657; }
+
+  /* 플로우차트 */
+  .flowchart { margin: 24px 0; }
+  .flow-node { display: inline-flex; align-items: center; justify-content: center;
+               padding: 10px 18px; border-radius: 8px; font-size: 13px; margin: 4px;
+               min-width: 100px; text-align: center; }
+  .flow-start    { background: #238636; color: #fff; border-radius: 20px; }
+  .flow-decision { background: #1a1a2e; color: #e6edf3; border: 2px solid #ffa657;
+                   transform: rotate(0deg); padding: 12px 16px; }
+  .flow-result   { background: #161b22; color: #e6edf3; border: 2px solid #30363d; }
+  .flow-result-skip   { background: #30363d; color: #AAAAAA; }
+  .flow-result-normal { background: #1a3050; color: #4472C4; border: 2px solid #4472C4; }
+  .flow-result-noexam { background: #2d1b35; color: #FF69B4; border: 2px solid #FF69B4; }
+  .flow-result-change { background: #2d2600; color: #FFD700; border: 2px solid #FFD700; }
+  .flow-result-split  { background: #1f1535; color: #9370DB; border: 2px solid #9370DB; }
+  .flow-arrow { color: #58a6ff; font-size: 20px; margin: 0 6px; }
+  .flow-row { display: flex; align-items: center; flex-wrap: wrap; margin: 8px 0; }
+  .flow-yes { color: #3fb950; font-size: 12px; font-weight: bold; margin: 0 4px; }
+  .flow-no  { color: #da3633; font-size: 12px; font-weight: bold; margin: 0 4px; }
+
+  /* 매핑 테이블 */
+  .mapping-table { border-collapse: collapse; margin: 20px 0; }
+  .mapping-table td, .mapping-table th {
+    padding: 10px 16px; border: 1px solid #30363d; text-align: center; font-size: 13px;
+  }
+  .mapping-table th { background: #161b22; color: #8b949e; }
+  .mapping-table .arrow-cell { background: none; border: none; font-size: 20px; color: #58a6ff; }
+
+  /* 검수 카드 */
+  .review-cards { display: flex; flex-wrap: wrap; gap: 12px; margin: 20px 0; }
+  .review-card { background: #161b22; border: 1px solid #30363d; border-radius: 8px;
+                 padding: 16px; min-width: 220px; flex: 1; }
+  .review-card .card-icon { font-size: 24px; margin-bottom: 8px; }
+  .review-card .card-title { color: #ffa657; font-weight: bold; font-size: 14px; margin-bottom: 6px; }
+  .review-card .card-desc { color: #8b949e; font-size: 12px; }
+</style>
+</head>
+<body>
+
+<h1>강의실 배정 프로그램 — 산수 비주얼 가이드</h1>
+<p class="subtitle">모든 로직은 <span class="highlight">하나의 격자</span> 위에서 일어난다</p>
+
+<!-- ================================================================ -->
+<div class="section">
+<h2>기본 격자: 강의실 x 교시</h2>
+<p>행 = 강의실, 열 = 교시 (0~14교시, 8시~23시). 이것이 모든 계산의 무대다.</p>
+
+<table class="grid">
+  <tr>
+    <th></th><th>0교시<br><span class="cap">8~9</span></th><th>1교시<br><span class="cap">9~10</span></th>
+    <th>2교시<br><span class="cap">10~11</span></th><th>3교시<br><span class="cap">11~12</span></th>
+    <th>4교시<br><span class="cap">12~13</span></th><th>5교시<br><span class="cap">13~14</span></th>
+  </tr>
+  <tr>
+    <td class="room-header">K106 <span class="cap">(80석)</span></td>
+    <td class="cell-free"></td><td class="cell-class">수업</td><td class="cell-class">수업</td>
+    <td class="cell-class">수업</td><td class="cell-free"></td><td class="cell-free"></td>
+  </tr>
+  <tr>
+    <td class="room-header">K201 <span class="cap">(60석)</span></td>
+    <td class="cell-free"></td><td class="cell-free"></td><td class="cell-class">수업</td>
+    <td class="cell-class">수업</td><td class="cell-class">수업</td><td class="cell-free"></td>
+  </tr>
+  <tr>
+    <td class="room-header">K302 <span class="cap">(120석)</span></td>
+    <td class="cell-class">수업</td><td class="cell-class">수업</td><td class="cell-free"></td>
+    <td class="cell-free"></td><td class="cell-free"></td><td class="cell-free"></td>
+  </tr>
+  <tr>
+    <td class="room-header">K401 <span class="cap">(50석)</span></td>
+    <td class="cell-free"></td><td class="cell-free"></td><td class="cell-free"></td>
+    <td class="cell-free"></td><td class="cell-class">수업</td><td class="cell-class">수업</td>
+  </tr>
+</table>
+
+<div class="legend">
+  <div class="legend-item"><div class="legend-box" style="background:#8B4513;"></div>수업 중 (사용 불가)</div>
+  <div class="legend-item"><div class="legend-box" style="background:#1a1a2e;"></div>빈 슬롯</div>
+</div>
+</div>
+
+<!-- ================================================================ -->
+<div class="section">
+<h2>1. 배정 = 빈 셀에 시험 넣기</h2>
+<p>과목A를 K302의 2~3교시에 배정하면 빈 셀이 파란색으로 채워진다.</p>
+
+<div class="arrow-flow">
+  <div>
+    <table class="grid">
+      <tr><th></th><th>0</th><th>1</th><th>2</th><th>3</th><th>4</th><th>5</th></tr>
+      <tr>
+        <td class="room-header">K302</td>
+        <td class="cell-class">수업</td><td class="cell-class">수업</td>
+        <td class="cell-free"></td><td class="cell-free"></td>
+        <td class="cell-free"></td><td class="cell-free"></td>
+      </tr>
+    </table>
+  </div>
+  <div>
+    <div class="arrow-label">→</div>
+    <div class="flow-desc">배정!</div>
+  </div>
+  <div>
+    <table class="grid">
+      <tr><th></th><th>0</th><th>1</th><th>2</th><th>3</th><th>4</th><th>5</th></tr>
+      <tr>
+        <td class="room-header">K302</td>
+        <td class="cell-class">수업</td><td class="cell-class">수업</td>
+        <td class="cell-exam">과목A</td><td class="cell-exam">과목A</td>
+        <td class="cell-free"></td><td class="cell-free"></td>
+      </tr>
+    </table>
+  </div>
+</div>
+</div>
+
+<!-- ================================================================ -->
+<div class="section">
+<h2>2. 자동 해제 = 셀 비우기 (3가지)</h2>
+
+<h3 style="color:#FF69B4; margin:30px 0 10px;">2-1. 미실시 → 전체 해제</h3>
+<p>시험을 안 보면 수업 시간 전체가 비워진다.</p>
+
+<div class="arrow-flow">
+  <div>
+    <table class="grid">
+      <tr><th></th><th>1</th><th>2</th><th>3</th></tr>
+      <tr>
+        <td class="room-header">K106</td>
+        <td class="cell-class">수업</td><td class="cell-class">수업</td><td class="cell-class">수업</td>
+      </tr>
+    </table>
+  </div>
+  <div>
+    <div class="arrow-label">→</div>
+    <div class="flow-desc">미실시!</div>
+  </div>
+  <div>
+    <table class="grid">
+      <tr><th></th><th>1</th><th>2</th><th>3</th></tr>
+      <tr>
+        <td class="room-header">K106</td>
+        <td class="cell-released">해제</td><td class="cell-released">해제</td><td class="cell-released">해제</td>
+      </tr>
+    </table>
+  </div>
+</div>
+
+<h3 style="color:#ffa657; margin:30px 0 10px;">2-2. 강의실 이동 → 원래 방 해제</h3>
+<p>다른 방으로 옮기면 원래 방이 비워진다.</p>
+
+<div class="arrow-flow">
+  <div>
+    <table class="grid">
+      <tr><th></th><th>2</th><th>3</th></tr>
+      <tr><td class="room-header">K106 <span class="cap">(원래)</span></td>
+          <td class="cell-class">수업</td><td class="cell-class">수업</td></tr>
+      <tr><td class="room-header">K302 <span class="cap">(새방)</span></td>
+          <td class="cell-free"></td><td class="cell-free"></td></tr>
+    </table>
+  </div>
+  <div>
+    <div class="arrow-label">→</div>
+    <div class="flow-desc">이동!</div>
+  </div>
+  <div>
+    <table class="grid">
+      <tr><th></th><th>2</th><th>3</th></tr>
+      <tr><td class="room-header">K106 <span class="cap">(원래)</span></td>
+          <td class="cell-released">해제</td><td class="cell-released">해제</td></tr>
+      <tr><td class="room-header">K302 <span class="cap">(새방)</span></td>
+          <td class="cell-exam">과목C</td><td class="cell-exam">과목C</td></tr>
+    </table>
+  </div>
+</div>
+
+<h3 style="color:#79c0ff; margin:30px 0 10px;">2-3. 부분 해제 → 남는 교시만 비우기</h3>
+<p>수업 3교시인데 시험 1교시만 → 나머지 2교시 해제</p>
+
+<div class="arrow-flow">
+  <div>
+    <table class="grid">
+      <tr><th></th><th>1</th><th>2</th><th>3</th></tr>
+      <tr><td class="room-header">K201</td>
+          <td class="cell-class">수업</td><td class="cell-class">수업</td><td class="cell-class">수업</td></tr>
+    </table>
+  </div>
+  <div>
+    <div class="arrow-label">→</div>
+    <div class="flow-desc">시험 1교시만</div>
+  </div>
+  <div>
+    <table class="grid">
+      <tr><th></th><th>1</th><th>2</th><th>3</th></tr>
+      <tr><td class="room-header">K201</td>
+          <td class="cell-exam">시험</td><td class="cell-released">해제</td><td class="cell-released">해제</td></tr>
+    </table>
+  </div>
+</div>
+
+<div class="formula">{1,2,3} ∖ {1} = {2,3} ← 수업교시 - 시험교시 = 해제교시</div>
+</div>
+
+<!-- ================================================================ -->
+<div class="section">
+<h2>3. 충돌 감지 = 같은 셀에 2개+</h2>
+<p>같은 강의실, 같은 교시에 두 과목 이상이 겹치면 <span style="color:#da3633; font-weight:bold;">충돌</span>.</p>
+
+<div class="arrow-flow">
+  <div>
+    <table class="grid">
+      <tr><th></th><th>2교시</th></tr>
+      <tr><td class="room-header">K106</td><td class="cell-exam">과목A</td></tr>
+    </table>
+    <p style="text-align:center; color:#8b949e; margin-top:4px;">+</p>
+    <table class="grid">
+      <tr><th></th><th>2교시</th></tr>
+      <tr><td class="room-header">K106</td><td class="cell-exam">과목B</td></tr>
+    </table>
+  </div>
+  <div>
+    <div class="arrow-label">→</div>
+  </div>
+  <div>
+    <table class="grid">
+      <tr><th></th><th>2교시</th></tr>
+      <tr><td class="room-header">K106</td><td class="cell-conflict">충돌! 2건</td></tr>
+    </table>
+    <p style="margin-top:8px; color:#da3633;">한 셀에 2개 이상 = 빨간 경고</p>
+  </div>
+</div>
+
+<p style="margin-top:20px;">단, <span class="highlight">같은 과목의 분반</span>(과목A-01, 과목A-01+2)끼리는 충돌 아님.</p>
+</div>
+
+<!-- ================================================================ -->
+<div class="section">
+<h2>4. 빈 강의실 판정 = 빈 셀 찾기</h2>
+<p>3교시에 빈 강의실은?</p>
+
+<table class="grid">
+  <tr><th></th><th>3교시</th><th>상태</th><th>판정</th></tr>
+  <tr><td class="room-header">K106</td><td class="cell-class">수업</td>
+      <td style="color:#8b949e;">수업 중</td><td style="color:#da3633; font-weight:bold;">X</td></tr>
+  <tr><td class="room-header">K201</td><td class="cell-released">해제</td>
+      <td style="color:#8b949e;">해제됨</td><td style="color:#3fb950; font-weight:bold;">O 사용 가능</td></tr>
+  <tr><td class="room-header">K302</td><td class="cell-free"></td>
+      <td style="color:#8b949e;">비어 있음</td><td style="color:#3fb950; font-weight:bold;">O 사용 가능</td></tr>
+  <tr><td class="room-header">K401</td><td class="cell-exam">배정됨</td>
+      <td style="color:#8b949e;">시험 배정</td><td style="color:#da3633; font-weight:bold;">X</td></tr>
+</table>
+
+<div class="formula">빈 방 = (수업 없음 OR 해제됨) AND 배정 안 됨</div>
+</div>
+
+<!-- ================================================================ -->
+<div class="section">
+<h2>5. 수급 현황 = 열(교시)별 빈 셀 세기</h2>
+
+<table class="supply-table">
+  <tr><th></th><th>1교시</th><th>2교시</th><th>3교시</th><th>4교시</th><th>5교시</th></tr>
+  <tr><td style="color:#3fb950; font-weight:bold;">공급 (빈 강의실)</td>
+      <td>2</td><td>1</td><td>2</td><td>3</td><td>4</td></tr>
+  <tr><td style="color:#ffa657; font-weight:bold;">수요 (미배정)</td>
+      <td>1</td><td>3</td><td>3</td><td>1</td><td>0</td></tr>
+  <tr><td style="font-weight:bold;">부족분</td>
+      <td class="ok">0</td><td class="shortage">2</td><td class="shortage">1</td>
+      <td class="ok">0</td><td class="ok">0</td></tr>
+</table>
+
+<div class="formula">부족분 = max(0, 수요 - 공급)</div>
+<p>양수면 해당 교시에 방이 모자란다는 뜻.</p>
+</div>
+
+<!-- ================================================================ -->
+<div class="section">
+<h2>6. 분반 완료 판정 = 수용인원 합산</h2>
+
+<p style="margin-bottom:15px;">수강생 <span class="highlight">120명</span>을 분반:</p>
+
+<div class="split-box">
+  <div class="room-box assigned">K201<br><strong>60석</strong></div>
+  <div class="plus">+</div>
+  <div class="room-box assigned">K302<br><strong>80석</strong></div>
+  <div class="equals">=</div>
+  <div style="text-align:center;">
+    <div style="font-size:24px; font-weight:bold; color:#e6edf3;">140석</div>
+    <div class="result-ok">140 >= 120 → 완료!</div>
+  </div>
+</div>
+
+<div class="split-box" style="border-color:#da3633;">
+  <div class="room-box assigned">K201<br><strong>60석</strong></div>
+  <div class="plus">+</div>
+  <div class="room-box unknown">????<br><strong>??석</strong></div>
+  <div class="equals">=</div>
+  <div style="text-align:center;">
+    <div style="font-size:24px; font-weight:bold; color:#e6edf3;">60석</div>
+    <div class="result-ng">60 < 120 → 미배정!</div>
+  </div>
+</div>
+
+<div class="formula">배정 강의실 수용인원 합 >= 수강생 수 → 완료</div>
+</div>
+
+<!-- ================================================================ -->
+<div class="section">
+<h2>7. 가동률 = 찬 셀 / 전체 셀</h2>
+<p>강의실 3개 x 15교시 = 45칸, 수업 10칸, 해제 2칸</p>
+
+<div class="util-bar-wrap">
+  <div class="util-bar-fill" style="width:17.8%; background:#4472C4;">17.8%</div>
+  <div class="util-bar-label">45칸 중 8칸 사용</div>
+</div>
+
+<div class="formula">(수업 슬롯 - 해제 슬롯) / (강의실 수 x 15) x 100 = 가동률(%)</div>
+<div class="formula">(10 - 2) / (3 x 15) x 100 = 17.8%</div>
+</div>
+
+<!-- ================================================================ -->
+<div class="section">
+<h2>8. 히트맵 색상 = 빈 셀 수에 따라</h2>
+
+<div class="heatmap">
+  <div class="heat-cell" style="background:#da3633;">0개<br>위험</div>
+  <div class="heat-cell" style="background:#cc4466;">1~3개<br>부족</div>
+  <div class="heat-cell" style="background:#9e6a03;">4~10개<br>보통</div>
+  <div class="heat-cell" style="background:#238636;">11개+<br>여유</div>
+</div>
+</div>
+
+<!-- ================================================================ -->
+<div class="section">
+<h2>9. 분류 판정 = 위에서 아래로 흘러가는 분기</h2>
+<p>각 시험 요청이 엑셀 데이터에 따라 5가지 중 하나로 분류된다.</p>
+
+<div class="flowchart">
+
+  <div class="flow-row">
+    <div class="flow-node flow-start">요청 1건 입력</div>
+    <span class="flow-arrow">→</span>
+    <div class="flow-node flow-decision">스케줄 있음?</div>
+    <span class="flow-no">NO</span>
+    <span class="flow-arrow">→</span>
+    <div class="flow-node flow-result-skip">미확정 (SKIP)</div>
+  </div>
+
+  <div style="margin-left: 236px; color:#58a6ff;">↓ <span class="flow-yes">YES</span></div>
+
+  <div class="flow-row">
+    <div style="width:160px;"></div>
+    <div class="flow-node flow-decision">강의실 변경/분반 요청?</div>
+    <span class="flow-yes">YES</span>
+    <span class="flow-arrow">→</span>
+    <div class="flow-node flow-decision">시험일자 있음?</div>
+    <span class="flow-yes">YES</span>
+    <span class="flow-arrow">→</span>
+    <div class="flow-node flow-result-change">강의실 변경</div>
+    <span style="color:#8b949e; margin:0 4px;">/</span>
+    <div class="flow-node flow-result-split">강의실 분반</div>
+  </div>
+
+  <div style="margin-left: 236px; color:#58a6ff;">↓ <span class="flow-no">NO</span>
+    <span style="margin-left: 280px; color:#58a6ff;">↓ <span class="flow-no">NO</span> → <span style="color:#AAAAAA;">미확정</span></span>
+  </div>
+
+  <div class="flow-row">
+    <div style="width:160px;"></div>
+    <div class="flow-node flow-decision">시험일자 있음?</div>
+    <span class="flow-no">NO</span>
+    <span class="flow-arrow">→</span>
+    <div class="flow-node flow-decision">미실시 키워드?</div>
+    <span class="flow-yes">YES →</span>
+    <div class="flow-node flow-result-noexam">미실시 (NO_EXAM)</div>
+    <span style="color:#8b949e; margin:0 8px;">|</span>
+    <span class="flow-no">NO →</span>
+    <div class="flow-node flow-result-skip">미확정</div>
+  </div>
+
+  <div style="margin-left: 236px; color:#58a6ff;">↓ <span class="flow-yes">YES</span></div>
+
+  <div class="flow-row">
+    <div style="width:160px;"></div>
+    <div class="flow-node flow-decision">시험일자 범위 안?</div>
+    <span class="flow-no">NO</span>
+    <span class="flow-arrow">→</span>
+    <div class="flow-node flow-result-skip">미확정</div>
+  </div>
+
+  <div style="margin-left: 236px; color:#58a6ff;">↓ <span class="flow-yes">YES</span></div>
+
+  <div class="flow-row">
+    <div style="width:160px;"></div>
+    <div class="flow-node flow-decision">시험교시 OR 기존강의실?</div>
+    <span class="flow-yes">YES</span>
+    <span class="flow-arrow">→</span>
+    <div class="flow-node flow-result-normal">시험 진행 (NORMAL)</div>
+  </div>
+
+  <div style="margin-left: 236px; color:#58a6ff;">↓ <span class="flow-no">NO</span></div>
+
+  <div class="flow-row">
+    <div style="width:160px;"></div>
+    <div class="flow-node flow-decision">미실시 키워드?</div>
+    <span class="flow-yes">YES</span>
+    <span class="flow-arrow">→</span>
+    <div class="flow-node flow-result-noexam">미실시 (NO_EXAM)</div>
+    <span style="color:#8b949e; margin:0 8px;">|</span>
+    <span class="flow-no">NO →</span>
+    <div class="flow-node flow-result-normal">시험 진행 (NORMAL)</div>
+  </div>
+
+</div>
+
+<p style="margin-top:16px;">핵심: <span class="highlight">구조화된 컬럼</span>(강의실선택, 시험일자, 시험교시)으로 먼저 판정하고,
+  미실시 키워드 매칭은 <span class="highlight">마지막 보조 수단</span>으로만 사용한다.</p>
+</div>
+
+<!-- ================================================================ -->
+<div class="section">
+<h2>10. 날짜 → 시트 매핑 = 시험일을 격자로 연결</h2>
+<p>시험일자(날짜)가 어떤 시간표 시트(=격자)에 대응되는지를 연결하는 과정.</p>
+
+<table class="mapping-table">
+  <tr>
+    <th>엑셀 시트 이름</th>
+    <td class="arrow-cell">→</td>
+    <th>파싱</th>
+    <td class="arrow-cell">→</td>
+    <th>날짜</th>
+    <td class="arrow-cell">→</td>
+    <th>요일</th>
+  </tr>
+  <tr>
+    <td>"4.21.(화)"</td>
+    <td class="arrow-cell">→</td>
+    <td>월=4, 일=21, 요일=화</td>
+    <td class="arrow-cell">→</td>
+    <td>2026-04-21</td>
+    <td class="arrow-cell">→</td>
+    <td>화</td>
+  </tr>
+  <tr>
+    <td>"4.22.(수)"</td>
+    <td class="arrow-cell">→</td>
+    <td>월=4, 일=22, 요일=수</td>
+    <td class="arrow-cell">→</td>
+    <td>2026-04-22</td>
+    <td class="arrow-cell">→</td>
+    <td>수</td>
+  </tr>
+  <tr>
+    <td>"4.23.(목)"</td>
+    <td class="arrow-cell">→</td>
+    <td>월=4, 일=23, 요일=목</td>
+    <td class="arrow-cell">→</td>
+    <td>2026-04-23</td>
+    <td class="arrow-cell">→</td>
+    <td>목</td>
+  </tr>
+</table>
+
+<p style="margin-top:16px;">이렇게 3개의 매핑이 만들어진다:</p>
+
+<div class="arrow-flow">
+  <div>
+    <div class="flow-node flow-result" style="border-color:#58a6ff;">
+      <strong>요청의 시험일자</strong><br>2026-04-21
+    </div>
+  </div>
+  <div>
+    <div class="arrow-label">→</div>
+    <div class="flow-desc" style="font-size:12px;">date_to_day</div>
+  </div>
+  <div>
+    <div class="flow-node flow-result" style="border-color:#ffa657;">
+      <strong>요일</strong><br>화
+    </div>
+  </div>
+  <div>
+    <div class="arrow-label">→</div>
+    <div class="flow-desc" style="font-size:12px;">day_to_sheet</div>
+  </div>
+  <div>
+    <div class="flow-node flow-result" style="border-color:#3fb950;">
+      <strong>시간표 시트</strong><br>"4.21.(화)"
+    </div>
+  </div>
+  <div>
+    <div class="arrow-label">→</div>
+    <div class="flow-desc" style="font-size:12px;">격자 선택</div>
+  </div>
+  <div>
+    <div class="flow-node flow-result" style="border-color:#9370DB;">
+      <strong>그 날의 격자</strong><br>{강의실 x 교시}
+    </div>
+  </div>
+</div>
+
+<p>요청의 시험일자 → 요일 → 시트 이름 → 해당 날의 격자. 이 체인이 <span class="highlight">모든 계산의 출발점</span>이다.</p>
+</div>
+
+<!-- ================================================================ -->
+<div class="section">
+<h2>11. 검수 큐 = 자동 판정이 안 되는 4가지 경우</h2>
+<p>아래 조건에 해당하면 "사람이 확인해야 하는 항목"으로 검수 큐에 올라간다.</p>
+
+<div class="review-cards">
+  <div class="review-card">
+    <div class="card-icon" style="color:#AAAAAA;">?</div>
+    <div class="card-title">분류 미확정</div>
+    <div class="card-desc">스케줄 없음, 강의실 코드 없음,<br>시험일자 없는데 키워드도 없음 등<br>→ 자동 분류 불가</div>
+  </div>
+  <div class="review-card">
+    <div class="card-icon" style="color:#da3633;">!</div>
+    <div class="card-title">시험일자 누락/범위 밖</div>
+    <div class="card-desc">시험일자가 비어있거나<br>시간표 시트에 해당 날짜가 없음<br>→ 어느 격자인지 모름</div>
+  </div>
+  <div class="review-card">
+    <div class="card-icon" style="color:#ffa657;">⏱</div>
+    <div class="card-title">시험교시 정보 없음</div>
+    <div class="card-desc">시험 시작/종료 교시도 없고<br>수업시간표에서도 교시를 추출 못 함<br>→ 몇 교시인지 모름</div>
+  </div>
+  <div class="review-card">
+    <div class="card-icon" style="color:#FF69B4;">✕</div>
+    <div class="card-title">배정 후보 없음</div>
+    <div class="card-desc">변경/분반 요청인데<br>해당 교시에 빈 강의실이 0개<br>→ 옮길 곳이 없음</div>
+  </div>
+</div>
+
+<p>검수 큐는 <span class="highlight">데이터 품질 문제</span>를 잡아내는 필터다. 격자 위의 계산 이전에, 격자에 올릴 수 있는지부터 확인하는 것.</p>
+</div>
+
+<!-- ================================================================ -->
+<div class="section">
+<h2>한 장 요약</h2>
+
+<div class="summary-box">
+  <p style="text-align:center; color:#58a6ff; font-size:1.2em; margin-bottom:20px;
+            font-weight:bold;">모든 산수 = 격자 위에서 셀을 채우고, 비우고, 세기</p>
+  <ul>
+    <li><span class="op">분류</span>구조화된 컬럼 기반 5가지 분기 판정</li>
+    <li><span class="op">매핑</span>시험일자 → 요일 → 시트 → 격자 연결</li>
+    <li><span class="op">검수</span>격자에 올리기 전 데이터 품질 확인</li>
+    <li style="border-bottom: 2px solid #30363d;"></li>
+    <li><span class="op">배정</span>빈 셀에 시험 넣기</li>
+    <li><span class="op">해제</span>미실시 / 이동 / 부분 → 셀 비우기</li>
+    <li><span class="op">충돌</span>한 셀에 2개 이상 → 빨간 경고</li>
+    <li><span class="op">빈 강의실</span>비었거나 해제된 셀 찾기</li>
+    <li><span class="op">수급</span>열(교시)별 빈 셀 수 vs 수요</li>
+    <li><span class="op">분반 완료</span>수용인원 합 >= 수강생 수</li>
+    <li><span class="op">가동률</span>찬 셀 / 전체 셀 x 100</li>
+  </ul>
+</div>
+</div>
+
+</body>
+</html>
