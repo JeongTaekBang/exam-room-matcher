@@ -7,6 +7,7 @@
 import html as html_mod
 import io
 import re
+import time
 import argparse
 import os
 from pathlib import Path
@@ -645,6 +646,35 @@ if "releases" not in st.session_state:
     st.session_state.released_slots = releases_to_slot_set(st.session_state.releases)
 
 
+# ── 취소 2단계 확인 헬퍼 ──
+# 운영자가 ✕ 버튼을 실수로 한 번 눌렀을 때 즉시 삭제되는 것을 막는다.
+# 같은 버튼을 60초 안에 한 번 더 눌러야 실제 삭제가 일어난다.
+# 동시에 하나의 pending만 허용 — 다른 ✕를 누르면 이전 pending은 교체된다.
+
+_PENDING_CANCEL_TTL = 60.0
+
+
+def _is_pending_cancel(target_id: str) -> bool:
+    """target_id가 현재 취소 대기 중인지 반환. TTL 만료 시 자동 정리."""
+    pending = st.session_state.get("_pending_cancel")
+    if not pending:
+        return False
+    target, ts = pending
+    if time.monotonic() - ts > _PENDING_CANCEL_TTL:
+        st.session_state.pop("_pending_cancel", None)
+        return False
+    return target == target_id
+
+
+def _mark_pending_cancel(target_id: str) -> None:
+    """target_id를 취소 대기로 표시. 이전 pending은 자동 교체된다."""
+    st.session_state._pending_cancel = (target_id, time.monotonic())
+
+
+def _clear_pending_cancel() -> None:
+    st.session_state.pop("_pending_cancel", None)
+
+
 def persist_assignments():
     """배정을 파일에 저장한다. 실패 시 호출 전 스냅샷으로 롤백."""
     _backup = dict(st.session_state.assignments)
@@ -1126,10 +1156,21 @@ with tab2:
                             _rel_cap = room_capacity.get(rel["room"], "")
                             _cap_str = f" [{_rel_cap}명]" if _rel_cap else ""
                             _rc1.write(f"{rel['sheet']} / {rel['room']}{_cap_str} / {period_str}교시{_class_info}")
-                            if _rc2.button("취소", key=f"rel_cancel_{rkey}"):
-                                del st.session_state.releases[rkey]
-                                persist_releases()
-                                log_audit("unrelease", rkey, {"room": rel["room"], "periods": rel["periods"]})
+                            _rel_target = f"release:{rkey}"
+                            _rel_pending = _is_pending_cancel(_rel_target)
+                            if _rc2.button(
+                                "✓ 정말?" if _rel_pending else "취소",
+                                key=f"rel_cancel_{rkey}",
+                                type="primary" if _rel_pending else "secondary",
+                                help="한 번 더 누르면 해제가 취소됩니다." if _rel_pending else None,
+                            ):
+                                if _rel_pending:
+                                    del st.session_state.releases[rkey]
+                                    persist_releases()
+                                    log_audit("unrelease", rkey, {"room": rel["room"], "periods": rel["periods"]})
+                                    _clear_pending_cancel()
+                                else:
+                                    _mark_pending_cancel(_rel_target)
                                 st.rerun()
 
             # 미니 점유 현황 격자
@@ -1370,10 +1411,21 @@ with tab2:
                     _lc1, _lc2, _lc3 = st.columns([3, 2, 0.5])
                     _lc1.write(f"**{key}** ({a['students']}명)")
                     _lc2.write(f"{a['original_room']} → {a['room']} | {a['sheet']} {a['periods']}교시")
-                    if _lc3.button("✕", key=f"log_cancel_{key}"):
-                        del st.session_state.assignments[key]
-                        persist_assignments()
-                        log_audit("unassign", key, {"room": a["room"]})
+                    _cancel_target = f"assignment:{key}"
+                    _cancel_pending = _is_pending_cancel(_cancel_target)
+                    if _lc3.button(
+                        "✓ 정말?" if _cancel_pending else "✕",
+                        key=f"log_cancel_{key}",
+                        type="primary" if _cancel_pending else "secondary",
+                        help="한 번 더 누르면 배정이 삭제됩니다." if _cancel_pending else None,
+                    ):
+                        if _cancel_pending:
+                            del st.session_state.assignments[key]
+                            persist_assignments()
+                            log_audit("unassign", key, {"room": a["room"]})
+                            _clear_pending_cancel()
+                        else:
+                            _mark_pending_cancel(_cancel_target)
                         st.rerun()
                 st.markdown("---")
 
