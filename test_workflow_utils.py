@@ -67,6 +67,33 @@ def test_load_assignments_missing_and_invalid(tmp_path):
     assert load_assignments(invalid) == {}
 
 
+def test_load_assignments_quarantines_corrupted(tmp_path):
+    """손상된 JSON은 .corrupted-*.bak 파일로 격리되고 원본 자리는 비워진다."""
+    path = tmp_path / "assignments.json"
+    path.write_text("{broken json", encoding="utf-8")
+
+    assert load_assignments(path) == {}
+
+    # 원본 파일은 사라짐 → 다음 save가 깨끗하게 새 파일을 만들 수 있음
+    assert not path.exists()
+
+    # 격리 사본이 존재
+    backups = list(tmp_path.glob("assignments.json.corrupted-*.bak"))
+    assert len(backups) == 1
+    assert backups[0].read_text(encoding="utf-8") == "{broken json"
+
+
+def test_load_releases_quarantines_corrupted(tmp_path):
+    """load_releases도 동일하게 손상 파일을 격리한다."""
+    path = tmp_path / "releases.json"
+    path.write_text("not really json", encoding="utf-8")
+
+    assert load_releases(path) == {}
+    assert not path.exists()
+    backups = list(tmp_path.glob("releases.json.corrupted-*.bak"))
+    assert len(backups) == 1
+
+
 def test_save_and_load_assignments_roundtrip(tmp_path):
     path = tmp_path / "assignments.json"
     payload = {

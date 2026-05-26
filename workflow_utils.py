@@ -70,6 +70,27 @@ def resolve_needed_periods(req, exam_day: str) -> list[int]:
     return _clamp_periods(list(periods))
 
 
+def _quarantine_corrupted(path: Path) -> Path | None:
+    """손상된 JSON 파일을 ``{원본}.corrupted-YYYYMMDD_HHMMSS.bak`` 으로 격리한다.
+
+    원본은 사라지고, 호출자가 빈 dict를 반환하면 다음 ``save_*`` 호출이
+    원본 자리에 정상 파일을 새로 만든다. 격리 자체가 실패하면(권한 등)
+    None을 반환한다 — 손상 파일은 그대로 남고 호출자는 계속 빈 dict를
+    로드하므로 다음 저장이 손상 파일을 덮어쓸 위험은 있다.
+    """
+    if not path.exists():
+        return None
+    ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    backup = path.with_name(f"{path.name}.corrupted-{ts}.bak")
+    try:
+        path.rename(backup)
+    except OSError as e:
+        _log.warning("손상 파일 격리 실패 (%s): %s", path.name, e)
+        return None
+    _log.warning("손상 파일 격리: %s → %s", path.name, backup.name)
+    return backup
+
+
 def load_assignments(path: Path) -> dict:
     """저장된 배정 결과를 읽어 dict로 반환한다."""
     if not path.exists():
@@ -77,7 +98,7 @@ def load_assignments(path: Path) -> dict:
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError:
-        _log.warning("배정 파일 손상: %s — 빈 dict로 로드", path)
+        _quarantine_corrupted(path)
         return {}
     except OSError:
         return {}
@@ -137,7 +158,10 @@ def load_releases(path: Path) -> dict:
         return {}
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+    except json.JSONDecodeError:
+        _quarantine_corrupted(path)
+        return {}
+    except OSError:
         return {}
     if not isinstance(raw, dict):
         return {}
