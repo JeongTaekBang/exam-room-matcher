@@ -772,6 +772,8 @@ with tab2:
     st.subheader("배정 작업")
 
     # ── 진행 상황 요약 ──
+    _pct = _n_done / len(requests) if requests else 0.0
+    st.progress(_pct, text=f"진행률 {int(_pct * 100)}% — 완료 {_n_done} / 전체 {len(requests)}")
     _m1, _m2, _m3, _m4, _m5 = st.columns(5)
     with _m1:
         st.metric("완료", f"{_n_done}건", help=_done_help)
@@ -1104,12 +1106,19 @@ with tab2:
                 # 배정 모드 결정
                 _keep_as_is = False
                 _default_mode = 1 if sel_req.category == Category.ROOM_SPLIT else 0
-                _mode = st.radio("배정 방식",
-                                 ["이동 (다른 강의실로)", "분반 (기존 유지 + 추가)", "기존 강의실 유지"],
-                                 index=_default_mode,
-                                 key="u_assign_mode", horizontal=True)
+                _mode = st.radio(
+                    "배정 방식",
+                    [
+                        "이동: 다른 강의실로 옮김",
+                        "분반: 원래 + 추가 강의실 동시 사용",
+                        "유지: 원래 강의실 그대로",
+                    ],
+                    index=_default_mode,
+                    key="u_assign_mode",
+                    horizontal=True,
+                )
                 is_split = _mode.startswith("분반")
-                if _mode.startswith("기존"):
+                if _mode.startswith("유지"):
                     _keep_as_is = True
                 _save_cat = CAT_LABELS[sel_req.category]
                 if is_split:
@@ -1347,6 +1356,8 @@ with tab3:
     st.subheader("배정 현황")
 
     # ── 진행 상황 요약 ──
+    _pct = _n_done / len(requests) if requests else 0.0
+    st.progress(_pct, text=f"진행률 {int(_pct * 100)}% — 완료 {_n_done} / 전체 {len(requests)}")
     _s1, _s2, _s3, _s4, _s5 = st.columns(5)
     with _s1:
         st.metric("완료", f"{_n_done}건", help=_done_help)
