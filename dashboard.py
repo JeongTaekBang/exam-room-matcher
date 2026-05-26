@@ -1768,7 +1768,13 @@ with tab5:
     for sn in SHEET_ORDER:
         raw = timetable_data.get(sn, {})
         total = len(raw) * 15
-        released_count = sum(1 for s, r, p in all_released_slots if s == sn)
+        # 가동률 계산은 timetable에 있는 강의실만 분자·분모로 다룬다.
+        # 시간표 외 강의실(수업시간표에는 있지만 timetable 엑셀에 없는
+        # 강의실)의 release는 분자 차감에서 제외 — 그렇지 않으면
+        # filled가 음수가 될 수 있다.
+        released_count = sum(
+            1 for s, r, p in all_released_slots if s == sn and r in raw
+        )
         filled = sum(len(periods) for periods in raw.values()) - released_count
         pct = round(filled / total * 100, 1) if total else 0
         util_rows.append({"일자": sn, "점유율(%)": pct, "사용": filled, "해제": released_count, "전체": total})
