@@ -45,21 +45,16 @@ AUDIT_LOG_FILENAME = "_assignment_audit.jsonl"
 
 st.set_page_config(page_title="강의실 배정 프로그램", layout="wide")
 
-CAT_LABELS = {
-    Category.NORMAL_EXAM: "시험 진행",
-    Category.NO_EXAM: "미실시/대체과제",
-    Category.ROOM_CHANGE: "강의실 변경",
-    Category.ROOM_SPLIT: "강의실 분반",
-    Category.SKIP: "미확정",
-}
-# Category 라벨 단일 출처. assignments JSON의 "category" 필드 값이자
-# 모든 비교의 기준 — 라벨을 수정할 때 이 상수만 바꾸면 비교 코드는
-# 자동 동기화된다. 매직 문자열 비교는 금지.
-LABEL_NORMAL_EXAM = CAT_LABELS[Category.NORMAL_EXAM]
-LABEL_NO_EXAM = CAT_LABELS[Category.NO_EXAM]
-LABEL_ROOM_CHANGE = CAT_LABELS[Category.ROOM_CHANGE]
-LABEL_ROOM_SPLIT = CAT_LABELS[Category.ROOM_SPLIT]
-LABEL_SKIP = CAT_LABELS[Category.SKIP]
+from assignment_status import (
+    CAT_LABELS,
+    LABEL_NORMAL_EXAM,
+    LABEL_NO_EXAM,
+    LABEL_ROOM_CHANGE,
+    LABEL_ROOM_SPLIT,
+    LABEL_SKIP,
+    _room_cap,
+    compute_status,
+)
 CAT_COLORS = {
     Category.NORMAL_EXAM: "#4472C4",
     Category.NO_EXAM: "#FF69B4",
@@ -69,67 +64,8 @@ CAT_COLORS = {
 }
 DARK_BG = ("#4472C4", "#D2691E", "#5F9EA0", "#9370DB", "#FF0000", "#228B22")
 
-def _room_cap(room_capacity: dict | None, room: str) -> int:
-    if not room_capacity or not room:
-        return 0
-    try:
-        return int(room_capacity.get(room, 0) or 0)
-    except (TypeError, ValueError):
-        return 0
-
-
-def compute_status(req, assignments: dict, room_capacity: dict | None = None) -> str:
-    if req.category in (Category.NORMAL_EXAM, Category.NO_EXAM):
-        return "완료"
-    if req.category in (Category.ROOM_CHANGE, Category.ROOM_SPLIT):
-        related = [
-            (k, a) for k, a in assignments.items()
-            if k == req.key or k.startswith(req.key + "+")
-        ]
-        if not related:
-            return "미배정"
-
-        # 분반으로 저장된 항목이 하나라도 있으면 분반 완료 규칙을 적용한다.
-        is_split_mode = (
-            req.category == Category.ROOM_SPLIT
-            or any(a.get("category") == LABEL_ROOM_SPLIT for _, a in related)
-        )
-        if not is_split_mode:
-            # ROOM_CHANGE 단일 배정. 한 강의실 수용인원이 학생 수 미만이면
-            # "미배정"으로 표시 — UI 배정 흐름에서는 cap_short 가드로 막히지만
-            # JSON 직접 편집·마이그레이션 등으로 invalid 상태가 들어왔을 때
-            # compute_status가 잘못 "완료"로 보고하는 것을 막는다.
-            if room_capacity is None:
-                return "완료"
-            _, only_a = related[0]
-            assigned_room = str(only_a.get("room", ""))
-            need = int(getattr(req, "students", 0) or 0)
-            if _room_cap(room_capacity, assigned_room) < need:
-                return "미배정"
-            return "완료"
-
-        keeps_original = any(
-            bool(a.get("keep_orig", True))
-            for _, a in related
-            if a.get("category") == LABEL_ROOM_SPLIT
-        )
-
-        # 기존 강의실 미유지 분반은 "배정 강의실 수용인원 합"이 수강생 이상일 때 완료.
-        if not keeps_original:
-            if room_capacity is None:
-                # 용량 정보가 없으면 보수적으로 최소 2개 배정일 때만 완료로 본다.
-                return "완료" if len(related) >= 2 else "미배정"
-            total_cap = 0
-            seen_rooms = set()
-            for _, a in related:
-                room = str(a.get("room", ""))
-                if room and room not in seen_rooms:
-                    total_cap += _room_cap(room_capacity, room)
-                    seen_rooms.add(room)
-            if total_cap < int(getattr(req, "students", 0) or 0):
-                return "미배정"
-        return "완료"
-    return "미확정"
+# compute_status / _room_cap / CAT_LABELS·LABEL_* 는 assignment_status.py 로 분리
+# (Streamlit 의존성 없이 단위 테스트 가능하도록).
 
 
 # ──────────────────────────────────────────────
