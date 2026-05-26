@@ -95,6 +95,17 @@ def compute_status(req, assignments: dict, room_capacity: dict | None = None) ->
             or any(a.get("category") == LABEL_ROOM_SPLIT for _, a in related)
         )
         if not is_split_mode:
+            # ROOM_CHANGE 단일 배정. 한 강의실 수용인원이 학생 수 미만이면
+            # "미배정"으로 표시 — UI 배정 흐름에서는 cap_short 가드로 막히지만
+            # JSON 직접 편집·마이그레이션 등으로 invalid 상태가 들어왔을 때
+            # compute_status가 잘못 "완료"로 보고하는 것을 막는다.
+            if room_capacity is None:
+                return "완료"
+            _, only_a = related[0]
+            assigned_room = str(only_a.get("room", ""))
+            need = int(getattr(req, "students", 0) or 0)
+            if _room_cap(room_capacity, assigned_room) < need:
+                return "미배정"
             return "완료"
 
         keeps_original = any(
