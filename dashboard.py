@@ -823,6 +823,11 @@ def _next_split_key(key):
 _n_done = sum(1 for r in requests if compute_status(r, st.session_state.assignments, room_capacity) == "완료")
 _n_todo = sum(1 for r in requests if compute_status(r, st.session_state.assignments, room_capacity) == "미배정")
 _n_skip = sum(1 for r in requests if compute_status(r, st.session_state.assignments, room_capacity) == "미확정")
+# 완료 = 자동(NORMAL_EXAM + NO_EXAM, 분류만으로 결정) + 수동(ROOM_CHANGE/SPLIT 배정 충족)
+_n_auto_done = sum(
+    1 for r in requests if r.category in (Category.NORMAL_EXAM, Category.NO_EXAM)
+)
+_n_manual_done = _n_done - _n_auto_done
 _review_rows = build_review_queue_rows(
     requests, timetable_data, room_capacity, st.session_state.assignments,
     all_released_slots,
@@ -863,7 +868,9 @@ with tab2:
 
     # ── 진행 상황 요약 ──
     _m1, _m2, _m3, _m4, _m5 = st.columns(5)
-    _m1.metric("완료", f"{_n_done}건", help=_done_help)
+    with _m1:
+        st.metric("완료", f"{_n_done}건", help=_done_help)
+        st.caption(f"자동 {_n_auto_done} / 수동 {_n_manual_done}")
     _m2.metric("미배정", f"{_n_todo}건")
     _m3.metric("미확정", f"{_n_skip}건")
     _m4.metric("검수 큐", f"{len(_review_rows)}건")
@@ -1440,7 +1447,9 @@ with tab3:
 
     # ── 진행 상황 요약 ──
     _s1, _s2, _s3, _s4, _s5 = st.columns(5)
-    _s1.metric("완료", f"{_n_done}건", help=_done_help)
+    with _s1:
+        st.metric("완료", f"{_n_done}건", help=_done_help)
+        st.caption(f"자동 {_n_auto_done} / 수동 {_n_manual_done}")
     _s2.metric("미배정", f"{_n_todo}건")
     _s3.metric("미확정", f"{_n_skip}건")
     _s4.metric("검수 큐", f"{len(_review_rows)}건")
