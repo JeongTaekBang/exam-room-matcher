@@ -53,6 +53,8 @@ streamlit run dashboard.py
 run.bat
 ```
 
+> 처음 쓰거나 오랜만이라면 → [사용 가이드 (doc/USAGE.md)](doc/USAGE.md)
+
 ## 데이터 구조
 
 ```
