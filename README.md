@@ -66,17 +66,19 @@ exam_room_matcher/
 │   ├── _releases.json          # 해제 결과 (자동 생성)
 │   └── _assignment_audit.jsonl # 작업 이력 (자동 생성)
 ├── data_loader.py              # 엑셀 파싱 + 요청 분류
-├── workflow_utils.py           # 영속화 + 감사 로그
+├── workflow_utils.py           # 영속화 + 감사 로그 + 손상 격리
+├── assignment_status.py        # 배정 상태 판정 + Category 라벨
 ├── dashboard.py                # Streamlit 대시보드
 ├── test_data_loader.py         # 테스트
 ├── test_workflow_utils.py      # 테스트
+├── test_assignment_status.py   # 테스트
 └── run.bat                     # 실행 스크립트
 ```
 
 ## 테스트
 
 ```bash
-python -X utf8 -m pytest test_data_loader.py test_workflow_utils.py -v
+python -X utf8 -m pytest -v
 ```
 
 > Windows + 한글 경로 환경에서는 `python -X utf8` 필수.
