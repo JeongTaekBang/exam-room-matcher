@@ -779,7 +779,12 @@ with tab2:
         st.metric("완료", f"{_n_done}건", help=_done_help)
         st.caption(f"자동 {_n_auto_done} / 수동 {_n_manual_done}")
     _m2.metric("미배정", f"{_n_todo}건")
-    _m3.metric("미확정", f"{_n_skip}건")
+    _m3.metric(
+        "미확정", f"{_n_skip}건",
+        help="분류 단계에서 정보 부족으로 분류 안 된 항목. "
+             "탭3 검수 큐의 '세부' 컬럼에서 사유를 확인하고 "
+             "요청 엑셀을 정정한 뒤 사이드바의 '엑셀 데이터 다시 불러오기'를 누르면 재분류됩니다.",
+    )
     _m4.metric("검수 큐", f"{len(_review_rows)}건")
     _m5.metric("전체", f"{len(requests)}건")
 
@@ -1363,7 +1368,12 @@ with tab3:
         st.metric("완료", f"{_n_done}건", help=_done_help)
         st.caption(f"자동 {_n_auto_done} / 수동 {_n_manual_done}")
     _s2.metric("미배정", f"{_n_todo}건")
-    _s3.metric("미확정", f"{_n_skip}건")
+    _s3.metric(
+        "미확정", f"{_n_skip}건",
+        help="분류 단계에서 정보 부족으로 분류 안 된 항목. "
+             "아래 검수 큐의 '세부' 컬럼에서 사유를 확인하고 "
+             "요청 엑셀을 정정한 뒤 사이드바의 '엑셀 데이터 다시 불러오기'를 누르면 재분류됩니다.",
+    )
     _s4.metric("검수 큐", f"{len(_review_rows)}건")
     _s5.metric("전체", f"{len(requests)}건")
 

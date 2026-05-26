@@ -273,12 +273,12 @@ def classify_requests(requests: list, date_to_day: dict = None) -> list:
 
         if not req.slots:
             req.category = Category.SKIP
-            req.skip_reason = "스케줄 없음"
+            req.skip_reason = "수업시간표(I열) 누락 — I열에 시간표 입력 필요"
             continue
 
         if all(s.room == "" for s in req.slots):
             req.category = Category.SKIP
-            req.skip_reason = "강의실 코드 없음 (빈 괄호)"
+            req.skip_reason = "수업시간표 강의실 표기 누락 — I열의 (강의실) 부분 정정 필요"
             continue
 
         # 시험일 요일에 해당하는 강의실로 재설정
@@ -296,9 +296,10 @@ def classify_requests(requests: list, date_to_day: dict = None) -> list:
                                 else Category.ROOM_SPLIT)
             else:
                 req.category = Category.SKIP
+                _action = '변경' if _rc_norm == _RC_ROOM_CHANGE else '분반'
                 req.skip_reason = (
-                    f"강의실 {'변경' if _rc_norm == _RC_ROOM_CHANGE else '분반'} "
-                    f"요청이나 시험일자 없음/범위 밖 ({req.exam_date})"
+                    f"강의실 {_action} 요청이지만 시험일자(K열) 없음/범위 밖 "
+                    f"({req.exam_date}) — K열 정정 필요"
                 )
             continue
 
@@ -307,12 +308,18 @@ def classify_requests(requests: list, date_to_day: dict = None) -> list:
                 req.category = Category.NO_EXAM
             else:
                 req.category = Category.SKIP
-                req.skip_reason = "시험일자 없고 요청사항 불명확"
+                req.skip_reason = (
+                    "시험일자(K열) 없고 미실시 키워드도 없음 — "
+                    "K열 추가 또는 O열에 '미실시'/'대체과제' 등 키워드 추가"
+                )
             continue
 
         if req.exam_date not in date_to_day:
             req.category = Category.SKIP
-            req.skip_reason = f"시험일자 범위 밖 ({req.exam_date})"
+            req.skip_reason = (
+                f"시험일자 범위 밖 ({req.exam_date}) — "
+                "K열 정정 또는 시험 기간 확인 필요"
+            )
             continue
 
         if req.exam_start is not None and req.exam_end is not None:
