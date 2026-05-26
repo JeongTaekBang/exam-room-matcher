@@ -1,5 +1,33 @@
 # Changelog
 
+## v2.6.0 (2026-05-26)
+
+### 코드 품질·안전 가드·산식 정밀화 (전반 점검 반영)
+
+**모듈 분리**
+- **[Medium] `assignment_status.py` 신설**: dashboard.py에서 compute_status, _room_cap, CAT_LABELS, LABEL_* 상수를 분리. Streamlit 의존성 없이 단위 테스트 가능. 25개 테스트 추가
+- **[Low] Category 라벨 매직 문자열 상수화**: assignments JSON의 한글 라벨 비교 8곳을 `LABEL_ROOM_SPLIT` 등 명시적 상수로 교체. CAT_LABELS가 단일 출처
+
+**산식 정확성**
+- **[High] 가동률 산식 음수 가능성 수정**: `released_count`가 시간표 외 강의실의 release를 분자에서 차감해 가동률이 음수가 되는 케이스 차단. `r in raw` 필터 추가
+- **[High] compute_status의 ROOM_CHANGE 수용인원 검증**: UI 가드를 우회한 invalid 상태(JSON 직접 편집 등)에서도 수용 부족 배정이 "완료"로 잘못 보고되지 않도록 수정. 실데이터에서 숨은 부족 배정 3건 발견
+- **[Medium] 1단계 충돌 감지 분반 형제 필터링**: 같은 과목명(`req.name`)의 다른 분반이 같은 시작 강의실에 미배정 상태로 표시되는 것을 충돌로 잘못 잡던 오탐 제거. 2단계 base_key 필터링과 일관성 확보
+- **[Medium] 다주차 동일 요일 NO_EXAM 자동해제**: `day_to_sheets`(요일→시트 목록, 1:N) 매핑 도입. 같은 요일이 여러 주에 있을 때 모든 시트에 동일하게 적용
+
+**데이터 무결성**
+- **[High] 손상 JSON 파일 자동 격리**: `load_assignments`/`load_releases` 파싱 실패 시 원본을 `{name}.corrupted-YYYYMMDD_HHMMSS.bak`으로 rename하여 격리. 다음 저장이 정상 파일을 신규 생성하므로 덮어쓰기 위험 차단
+- **[Medium] room_choice·NO_EXAM 키워드 공백 정규화**: "강의실변경요청"·"미 실시" 등 띄어쓰기 변형을 모두 흡수. NO_EXAM_KEYWORDS 목록도 11개로 정리
+
+**UX 안전 가드**
+- **[High] 배정/해제 취소 2단계 확인**: 한 클릭으로 즉시 삭제되던 ✕ 버튼이 "✓ 정말?"로 바뀌고 다시 눌러야 실제 삭제. 60초 TTL, 한 번에 하나만 pending
+- **[Medium] "완료" 지표 자동/수동 분리 표시**: metric 아래 caption으로 `자동 N / 수동 M`. 운영자가 손댈 작업이 얼마 남았는지 명확
+- **[Medium] 빈 강의실 0건 안내 보강**: "없음" 한 단어 메시지를 수용인원·교시 조정 방법까지 안내하는 다단계 가이드로 변경. 분반 작은 강의실 분할 옵션도 안내
+
+**버그 수정**
+- **[High] 빈 강의실 검색의 변수 누출**: `_resolve_sheet`에 `req.exam_date` 대신 `sel_req.exam_date`를 넘겨야 했던 한 줄 버그 수정. 외부 for 루프의 `req`가 누출되어 다른 일자의 강의실 후보가 표시되던 문제
+
+총 테스트: 31 → 82건
+
 ## v2.5.0 (2026-04-06)
 
 ### 다주차 매핑 + 안정성 (코드 리뷰 반영)
