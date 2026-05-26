@@ -139,9 +139,17 @@ def _parse_int(val) -> Optional[int]:
 
 
 def build_mappings_from_sheets(sheet_names: list, year: int) -> tuple:
-    """시간표 시트 이름에서 DATE_TO_DAY, DAY_TO_SHEET, SHEET_ORDER를 동적 생성한다."""
+    """시간표 시트 이름에서 날짜/요일/시트 매핑을 동적 생성한다.
+
+    Returns:
+        (date_to_day, day_to_sheet, sheet_order, date_to_sheet, day_to_sheets)
+        * day_to_sheet   : 요일→시트(마지막 시트). 하위 호환용 단일 매핑.
+        * day_to_sheets  : 요일→시트 목록(시간순). 다주차 안전 1:N 매핑.
+        * date_to_sheet  : 날짜→시트. 1:1, 항상 안전.
+    """
     date_to_day = {}
     day_to_sheet = {}
+    day_to_sheets: dict[str, list[str]] = {}
     parsed = []
 
     for name in sheet_names:
@@ -161,10 +169,11 @@ def build_mappings_from_sheets(sheet_names: list, year: int) -> tuple:
     for dt, dayname, name in parsed:
         date_to_day[dt] = dayname
         day_to_sheet[dayname] = name  # 동일 요일 시 마지막 시트 (하위 호환)
+        day_to_sheets.setdefault(dayname, []).append(name)  # 같은 요일 모든 시트
         date_to_sheet[dt] = name      # 날짜→시트 직접 매핑 (다주차 안전)
         sheet_order.append(name)
 
-    return date_to_day, day_to_sheet, sheet_order, date_to_sheet
+    return date_to_day, day_to_sheet, sheet_order, date_to_sheet, day_to_sheets
 
 
 def _infer_year(requests: list):
@@ -354,15 +363,16 @@ def load_all(request_file: str, timetable_file: str) -> dict:
 
     # 시트 이름에서 날짜 매핑을 동적 생성 (파싱 실패 시 하드코딩 폴백)
     date_to_sheet = {}
+    day_to_sheets: dict[str, list[str]] = {}
     year = _infer_year(requests)
     if year is not None:
-        date_to_day, day_to_sheet, sheet_order, date_to_sheet = build_mappings_from_sheets(
-            list(timetable_data.keys()), year
-        )
+        date_to_day, day_to_sheet, sheet_order, date_to_sheet, day_to_sheets = \
+            build_mappings_from_sheets(list(timetable_data.keys()), year)
     if year is None or not sheet_order:
         date_to_day, day_to_sheet, sheet_order = DATE_TO_DAY, DAY_TO_SHEET, SHEET_ORDER
-        # 하드코딩 폴백에서도 date_to_sheet 생성
+        # 하드코딩 폴백에서도 date_to_sheet/day_to_sheets 생성
         date_to_sheet = {}
+        day_to_sheets = {d: [s] for d, s in day_to_sheet.items()}
 
     requests = classify_requests(requests, date_to_day)
 
@@ -373,6 +383,7 @@ def load_all(request_file: str, timetable_file: str) -> dict:
         "timetable_data": timetable_data,
         "date_to_day": date_to_day,
         "day_to_sheet": day_to_sheet,
+        "day_to_sheets": day_to_sheets,
         "date_to_sheet": date_to_sheet,
         "sheet_order": sheet_order,
     }

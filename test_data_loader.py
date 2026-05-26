@@ -201,6 +201,32 @@ class TestBuildMappings:
         classify_requests([req], date_to_day=d2d)
         assert req.category == Category.SKIP
 
+    def test_day_to_sheets_multi_week(self):
+        """동일 요일이 여러 주에 걸쳐 있으면 day_to_sheets는 모두 보존하고,
+        day_to_sheet(하위 호환)는 마지막 시트만 가진다."""
+        sheets = ["4.15.(화)", "4.16.(수)", "4.22.(화)", "4.23.(수)"]
+        d2d, d2s_single, order, d2sheet, d2sheets = \
+            build_mappings_from_sheets(sheets, 2026)
+
+        # 1:N 매핑은 같은 요일의 모든 시트를 시간순으로 보존
+        assert d2sheets["화"] == ["4.15.(화)", "4.22.(화)"]
+        assert d2sheets["수"] == ["4.16.(수)", "4.23.(수)"]
+
+        # 1:1 매핑(하위 호환)은 마지막 시트만 보존 (기존 동작 유지)
+        assert d2s_single["화"] == "4.22.(화)"
+        assert d2s_single["수"] == "4.23.(수)"
+
+        # 날짜→시트는 항상 안전
+        assert d2sheet[datetime.date(2026, 4, 15)] == "4.15.(화)"
+        assert d2sheet[datetime.date(2026, 4, 22)] == "4.22.(화)"
+
+    def test_day_to_sheets_single_week(self):
+        """단일 주차에서는 day_to_sheets와 day_to_sheet가 동등."""
+        sheets = ["4.21.(화)", "4.22.(수)", "4.23.(목)"]
+        _, d2s_single, _, _, d2sheets = build_mappings_from_sheets(sheets, 2026)
+        for day, sheet in d2s_single.items():
+            assert d2sheets[day] == [sheet]
+
 
 class TestInferYear:
     def test_from_requests(self):

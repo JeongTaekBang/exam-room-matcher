@@ -596,6 +596,9 @@ room_capacity = data["room_capacity"]
 timetable_data = data["timetable_data"]
 DATE_TO_DAY = data.get("date_to_day", _DEFAULT_DATE_TO_DAY)
 DAY_TO_SHEET = data.get("day_to_sheet", _DEFAULT_DAY_TO_SHEET)
+DAY_TO_SHEETS: dict[str, list[str]] = data.get(
+    "day_to_sheets", {d: [s] for d, s in DAY_TO_SHEET.items()}
+)
 DATE_TO_SHEET = data.get("date_to_sheet", {})
 SHEET_ORDER = data.get("sheet_order", _DEFAULT_SHEET_ORDER)
 assignments_file = folder / ASSIGNMENTS_FILENAME
@@ -712,16 +715,14 @@ def _compute_auto_released() -> dict[tuple[str, str, int], tuple[str, str]]:
                 for p in periods:
                     result[(sheet, room, p)] = (req.key, "미실시")
         else:
-            # exam_date 없는 경우: 슬롯의 요일로 시트 결정
+            # exam_date 없는 경우: 슬롯의 요일에 해당하는 모든 시트에 적용 (다주차 안전)
             for slot in req.slots:
                 if not slot.room:
                     continue
-                sheet = DAY_TO_SHEET.get(slot.day)
-                if not sheet:
-                    continue
                 s, e = max(0, slot.start), min(14, slot.end)
-                for p in range(s, e + 1):
-                    result[(sheet, slot.room, p)] = (req.key, "미실시")
+                for sheet in DAY_TO_SHEETS.get(slot.day, ()):
+                    for p in range(s, e + 1):
+                        result[(sheet, slot.room, p)] = (req.key, "미실시")
     # NORMAL_EXAM: 시험 교시 < 수업 교시 → 미사용 교시 자동 해제
     for req in requests:
         if req.category != Category.NORMAL_EXAM or req.exam_start is None:

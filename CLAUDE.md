@@ -73,6 +73,8 @@ pip install openpyxl streamlit pandas pytest
 - 분류/해제 판단은 구조화된 숫자 컬럼 기반 (요청사항 텍스트에 의존하지 않음)
 - Windows + 한글 경로 → `python -X utf8` 필수
 
-## Known Limitations
+## Date/Day/Sheet 매핑
 
-- **요일→시트 1:1 매핑**: `day_to_sheet`가 동일 요일을 마지막 시트로 덮어씀. 다주차 시험(예: 화요일 2회)에서는 한쪽만 매핑됨. 확장 시 1:N 구조로 변경 필요 (`data_loader.py:160-163`)
+- `date_to_sheet`: 날짜→시트 1:1. 항상 안전. 실호출 경로는 이 매핑을 사용
+- `day_to_sheets`: 요일→시트 목록(시간순). 다주차 안전. exam_date가 없는 NO_EXAM 자동 해제에서 같은 요일의 모든 시트에 적용할 때 사용
+- `day_to_sheet`: 요일→마지막 시트(하위 호환). `_resolve_sheet`의 폴백 경로용. 호출처가 모두 사전에 `exam_date in DATE_TO_DAY`를 검증하므로 실질 데드 경로지만 안전망으로 유지
