@@ -460,7 +460,11 @@ def _build_day_verification(day, requests, timetable_data, assignments,
 
     conflict_cells = set()
     for (room, p), reqs in conflict_map.items():
-        if len(reqs) > 1:
+        # 같은 과목명의 다른 분반끼리는 시작 강의실이 같을 수 있고 둘 다
+        # ROOM_CHANGE/SPLIT으로 옮겨질 예정이므로 현재 표시상 겹치는 것은
+        # 실제 충돌이 아니다. 2단계 배정 충돌 감지와 동일한 형제 필터를 적용.
+        subjects = {r.name for r in reqs}
+        if len(reqs) > 1 and len(subjects) > 1:
             conflict_cells.add((room, p))
             full_data[room][p] = f"충돌! {len(reqs)}건"
             full_color[(room, p)] = "#FF0000"
