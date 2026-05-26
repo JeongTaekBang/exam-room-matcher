@@ -1163,7 +1163,7 @@ with tab2:
         with right:
             if sel_req.exam_date and sel_req.exam_date in DATE_TO_DAY:
                 exam_day = DATE_TO_DAY[sel_req.exam_date]
-                sheet = _resolve_sheet(req.exam_date, exam_day)
+                sheet = _resolve_sheet(sel_req.exam_date, exam_day)
                 raw_sel = timetable_data.get(sheet, {})
                 needed_periods = resolve_needed_periods(sel_req, exam_day)
 
