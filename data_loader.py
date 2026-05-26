@@ -37,11 +37,27 @@ PERIOD_TO_COL = {p: p + 6 for p in range(15)}
 SCHEDULE_RE = re.compile(r"([월화수목금토일])\s*(\d+)(?:\s*~\s*(\d+))?\s*\(\s*([^)]*?)\s*\)")
 _SHEET_NAME_RE = re.compile(r"(\d{1,2})\.(\d{1,2})\.\(([월화수목금토일])\)")
 
+# 공백을 모두 제거한 정규화 형태로만 등록. 매칭 시 remarks도 동일하게
+# 정규화되므로 "미실시"·"미 실시"·"미  실시" 등 띄어쓰기 변형을 모두
+# 흡수한다.
 NO_EXAM_KEYWORDS = [
-    "미실시", "미시행", "대체과제", "대체 과제", "과제대체", "과제 대체",
-    "미사용", "사용 안함", "사용안함", "이용 안함", "이용안함",
-    "불필요", "필요없음", "필요 없음", "온라인 시험",
+    "미실시", "미시행", "대체과제", "과제대체",
+    "미사용", "사용안함", "이용안함",
+    "불필요", "필요없음", "온라인시험",
 ]
+
+# room_choice 정규화 상수 — 비교용. 사용자가 적은 원본은 req.room_choice에
+# 그대로 보존되어 화면 표시·로그에 쓰인다.
+_RC_ROOM_CHANGE = "강의실변경요청"
+_RC_ROOM_SPLIT = "강의실분반요청"
+_RC_AS_IS = "기존강의실"
+
+
+def _normalize_choice(s) -> str:
+    """공백(다중공백, 탭, 줄바꿈 포함)을 모두 제거한 비교용 문자열을 반환."""
+    if not s:
+        return ""
+    return re.sub(r"\s+", "", str(s))
 
 SHEET_ORDER = ["4.21.(화)", "4.22.(수)", "4.23.(목)", "4.24.(금)", "4.27.(월)"]
 
@@ -187,7 +203,8 @@ def _infer_year(requests: list):
 def _has_no_exam_keyword(remarks: str) -> bool:
     if not remarks:
         return False
-    return any(kw in remarks for kw in NO_EXAM_KEYWORDS)
+    normalized = _normalize_choice(remarks)
+    return any(kw in normalized for kw in NO_EXAM_KEYWORDS)
 
 
 # ──────────────────────────────────────────────
@@ -251,6 +268,8 @@ def classify_requests(requests: list, date_to_day: dict = None) -> list:
     for req in requests:
         if req.room_choice:
             req.room_choice = req.room_choice.strip()
+        # 비교는 공백 변형을 흡수한 정규화 문자열로 한다. 원본은 표시·로그용으로 보존.
+        _rc_norm = _normalize_choice(req.room_choice)
 
         if not req.slots:
             req.category = Category.SKIP
@@ -270,15 +289,17 @@ def classify_requests(requests: list, date_to_day: dict = None) -> list:
                     req.room = slot.room
                     break
 
-        if req.room_choice in ("강의실 변경 요청", "강의실 분반 요청"):
+        if _rc_norm in (_RC_ROOM_CHANGE, _RC_ROOM_SPLIT):
             if req.exam_date is not None and req.exam_date in date_to_day:
                 req.category = (Category.ROOM_CHANGE
-                                if req.room_choice == "강의실 변경 요청"
+                                if _rc_norm == _RC_ROOM_CHANGE
                                 else Category.ROOM_SPLIT)
             else:
                 req.category = Category.SKIP
-                req.skip_reason = (f"강의실 {'변경' if '변경' in req.room_choice else '분반'} "
-                                   f"요청이나 시험일자 없음/범위 밖 ({req.exam_date})")
+                req.skip_reason = (
+                    f"강의실 {'변경' if _rc_norm == _RC_ROOM_CHANGE else '분반'} "
+                    f"요청이나 시험일자 없음/범위 밖 ({req.exam_date})"
+                )
             continue
 
         if req.exam_date is None:
@@ -296,7 +317,7 @@ def classify_requests(requests: list, date_to_day: dict = None) -> list:
 
         if req.exam_start is not None and req.exam_end is not None:
             req.category = Category.NORMAL_EXAM
-        elif req.room_choice == "기존 강의실":
+        elif _rc_norm == _RC_AS_IS:
             req.category = Category.NORMAL_EXAM
         else:
             if _has_no_exam_keyword(req.remarks):

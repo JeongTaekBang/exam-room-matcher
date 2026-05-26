@@ -118,6 +118,49 @@ class TestClassify:
         classify_requests([req])
         assert req.category == Category.ROOM_SPLIT
 
+    def test_room_choice_no_internal_space(self):
+        """내부 공백 없는 변형도 동일하게 인식."""
+        req = _make_req(room_choice="강의실변경요청")
+        classify_requests([req])
+        assert req.category == Category.ROOM_CHANGE
+
+    def test_room_choice_partial_space(self):
+        """일부 공백만 있는 변형도 흡수."""
+        req = _make_req(room_choice="강의실 분반요청")
+        classify_requests([req])
+        assert req.category == Category.ROOM_SPLIT
+
+    def test_room_choice_multi_space(self):
+        """다중 공백/탭/줄바꿈도 흡수."""
+        req = _make_req(room_choice="강의실  변경\t요청")
+        classify_requests([req])
+        assert req.category == Category.ROOM_CHANGE
+
+    def test_room_choice_as_is_no_space(self):
+        """'기존 강의실'도 공백 변형 흡수."""
+        # exam_start/end가 있으면 그것만으로 NORMAL_EXAM이 되므로
+        # _rc_norm 경로를 타도록 둘 다 None으로 세팅
+        req = _make_req(room_choice="기존강의실",
+                        exam_start=None, exam_end=None)
+        classify_requests([req])
+        assert req.category == Category.NORMAL_EXAM
+
+    def test_no_exam_keyword_with_space_variants(self):
+        """NO_EXAM 키워드의 공백 변형도 모두 흡수."""
+        for variant in ("미실시", "미 실시", "미  실시", "대체 과제",
+                        "사용 안함", "온라인 시험"):
+            req = _make_req(exam_date=None, remarks=f"비고: {variant}")
+            classify_requests([req])
+            assert req.category == Category.NO_EXAM, f"실패한 변형: {variant!r}"
+
+    def test_room_choice_original_preserved(self):
+        """비교는 정규화로 하지만 원본 room_choice 텍스트는 보존된다."""
+        original = "강의실변경요청"
+        req = _make_req(room_choice=original)
+        classify_requests([req])
+        assert req.room_choice == original
+        assert req.category == Category.ROOM_CHANGE
+
 
 class TestKeyDedup:
     """중복 키 감지 회귀 테스트."""
