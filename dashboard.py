@@ -52,6 +52,14 @@ CAT_LABELS = {
     Category.ROOM_SPLIT: "강의실 분반",
     Category.SKIP: "미확정",
 }
+# Category 라벨 단일 출처. assignments JSON의 "category" 필드 값이자
+# 모든 비교의 기준 — 라벨을 수정할 때 이 상수만 바꾸면 비교 코드는
+# 자동 동기화된다. 매직 문자열 비교는 금지.
+LABEL_NORMAL_EXAM = CAT_LABELS[Category.NORMAL_EXAM]
+LABEL_NO_EXAM = CAT_LABELS[Category.NO_EXAM]
+LABEL_ROOM_CHANGE = CAT_LABELS[Category.ROOM_CHANGE]
+LABEL_ROOM_SPLIT = CAT_LABELS[Category.ROOM_SPLIT]
+LABEL_SKIP = CAT_LABELS[Category.SKIP]
 CAT_COLORS = {
     Category.NORMAL_EXAM: "#4472C4",
     Category.NO_EXAM: "#FF69B4",
@@ -84,7 +92,7 @@ def compute_status(req, assignments: dict, room_capacity: dict | None = None) ->
         # 분반으로 저장된 항목이 하나라도 있으면 분반 완료 규칙을 적용한다.
         is_split_mode = (
             req.category == Category.ROOM_SPLIT
-            or any(a.get("category") == "강의실 분반" for _, a in related)
+            or any(a.get("category") == LABEL_ROOM_SPLIT for _, a in related)
         )
         if not is_split_mode:
             return "완료"
@@ -92,7 +100,7 @@ def compute_status(req, assignments: dict, room_capacity: dict | None = None) ->
         keeps_original = any(
             bool(a.get("keep_orig", True))
             for _, a in related
-            if a.get("category") == "강의실 분반"
+            if a.get("category") == LABEL_ROOM_SPLIT
         )
 
         # 기존 강의실 미유지 분반은 "배정 강의실 수용인원 합"이 수강생 이상일 때 완료.
@@ -469,7 +477,7 @@ def _build_day_verification(day, requests, timetable_data, assignments,
     for key, a in assignments.items():
         if a["sheet"] != day:
             continue
-        is_split = a.get("category") == "강의실 분반"
+        is_split = a.get("category") == LABEL_ROOM_SPLIT
         # 분반 키에서 기본키 추출: 마지막 "+"만 분리 (과목명에 +가 포함될 수 있음)
         _plus_idx = key.rfind("+")
         base_key = key[:_plus_idx] if _plus_idx > 0 and key[_plus_idx + 1:].isdigit() else key
@@ -514,7 +522,7 @@ def _build_day_verification(day, requests, timetable_data, assignments,
         for p in a["periods"]:
             assignment_map[(a["room"], p)].append(key)
         # ROOM_SPLIT: 원래 강의실 유지 시에만 충돌 집계에 포함
-        if a.get("category") == "강의실 분반" and a.get("keep_orig", True):
+        if a.get("category") == LABEL_ROOM_SPLIT and a.get("keep_orig", True):
             orig = a.get("original_room", "")
             if orig and orig != a["room"]:
                 for p in a["periods"]:
@@ -719,8 +727,8 @@ def _compute_auto_released() -> dict[tuple[str, str, int], tuple[str, str]]:
     # ROOM_CHANGE 배정 또는 분반(기존 미유지) → 원래 강의실 해제
     for key, a in st.session_state.assignments.items():
         cat = a.get("category", "")
-        is_change = cat == "강의실 변경"
-        is_split_no_keep = cat == "강의실 분반" and not a.get("keep_orig", True)
+        is_change = cat == LABEL_ROOM_CHANGE
+        is_split_no_keep = cat == LABEL_ROOM_SPLIT and not a.get("keep_orig", True)
         if not is_change and not is_split_no_keep:
             continue
         orig = a.get("original_room", "")
@@ -1014,7 +1022,7 @@ with tab2:
     # ── 미배정 섹션 ──
     def _is_split_assigned(key):
         """해당 키의 배정이 분반 모드인지 확인."""
-        return any(st.session_state.assignments[k].get("category") == "강의실 분반"
+        return any(st.session_state.assignments[k].get("category") == LABEL_ROOM_SPLIT
                    for k in st.session_state.assignments
                    if k == key or k.startswith(key + "+"))
 
@@ -1230,7 +1238,7 @@ with tab2:
                     _keep_as_is = True
                 _save_cat = CAT_LABELS[sel_req.category]
                 if is_split:
-                    _save_cat = "강의실 분반"
+                    _save_cat = LABEL_ROOM_SPLIT
 
                 if _keep_as_is:
                     orig_cap = room_capacity.get(sel_req.room, 0)
@@ -1253,7 +1261,7 @@ with tab2:
                             "periods": _keep_periods,
                             "original_room": sel_req.room,
                             "students": sel_req.students,
-                            "category": "시험 진행",
+                            "category": LABEL_NORMAL_EXAM,
                             "keep_orig": True,
                         }
                         persist_assignments()
@@ -1275,7 +1283,7 @@ with tab2:
                         _existing_keep_orig = any(
                             bool(a.get("keep_orig", True))
                             for a in _split_assignments
-                            if a.get("category") == "강의실 분반"
+                            if a.get("category") == LABEL_ROOM_SPLIT
                         )
                         if _existing_splits:
                             _keep_orig = _existing_keep_orig
@@ -1784,7 +1792,7 @@ with tab5:
     m1, m2, m3, m4, m5 = st.columns(5)
     total = len(requests)
     m1.metric("총 요청", f"{total}건")
-    m2.metric("시험 진행", f"{cat_counts.get('시험 진행', 0)}건")
+    m2.metric(LABEL_NORMAL_EXAM, f"{cat_counts.get(LABEL_NORMAL_EXAM, 0)}건")
     m3.metric("미실시", f"{cat_counts.get('미실시/대체과제', 0)}건")
     m4.metric("변경 요청", f"{cat_counts.get('강의실 변경', 0)}건")
     m5.metric("분반 요청", f"{cat_counts.get('강의실 분반', 0)}건")
