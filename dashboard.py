@@ -54,6 +54,7 @@ from assignment_status import (
     LABEL_ROOM_SPLIT,
     LABEL_SKIP,
     _room_cap,
+    compute_auto_released,
     compute_status,
     extract_base_key,
 )
@@ -664,68 +665,16 @@ def persist_releases():
     st.session_state.released_slots = releases_to_slot_set(st.session_state.releases)
 
 
+# _compute_auto_released는 assignment_status.compute_auto_released로 분리됨.
+# session_state·module-level globals를 인자로 주입하는 thin wrapper만 남긴다.
 def _compute_auto_released() -> dict[tuple[str, str, int], tuple[str, str]]:
-    """자동 해제 슬롯을 파생한다.
-
-    ROOM_CHANGE 배정 → 원래 강의실, NO_EXAM 요청 → 해당 강의실.
-
-    Returns: {(sheet, room, period): (subject_key, label)}
-    """
-    result: dict[tuple[str, str, int], tuple[str, str]] = {}
-    # ROOM_CHANGE 배정 또는 분반(기존 미유지) → 원래 강의실 해제
-    for key, a in st.session_state.assignments.items():
-        cat = a.get("category", "")
-        is_change = cat == LABEL_ROOM_CHANGE
-        is_split_no_keep = cat == LABEL_ROOM_SPLIT and not a.get("keep_orig", True)
-        if not is_change and not is_split_no_keep:
-            continue
-        orig = a.get("original_room", "")
-        if not orig or orig == a.get("room"):
-            continue
-        for p in a.get("periods", []):
-            result[(a["sheet"], orig, p)] = (key, "이동")
-    # NO_EXAM 요청 → 강의실 해제
-    for req in requests:
-        if req.category != Category.NO_EXAM:
-            continue
-        if req.exam_date and req.exam_date in DATE_TO_DAY:
-            exam_day = DATE_TO_DAY[req.exam_date]
-            sheet = _resolve_sheet(req.exam_date, exam_day)
-            periods = resolve_needed_periods(req, exam_day)
-            if not periods:
-                continue
-            rooms = {s.room for s in req.slots if s.day == exam_day and s.room}
-            if not rooms and req.room:
-                rooms = {req.room}
-            for room in rooms:
-                for p in periods:
-                    result[(sheet, room, p)] = (req.key, "미실시")
-        else:
-            # exam_date 없는 경우: 슬롯의 요일에 해당하는 모든 시트에 적용 (다주차 안전)
-            for slot in req.slots:
-                if not slot.room:
-                    continue
-                s, e = max(0, slot.start), min(14, slot.end)
-                for sheet in DAY_TO_SHEETS.get(slot.day, ()):
-                    for p in range(s, e + 1):
-                        result[(sheet, slot.room, p)] = (req.key, "미실시")
-    # NORMAL_EXAM: 시험 교시 < 수업 교시 → 미사용 교시 자동 해제
-    for req in requests:
-        if req.category != Category.NORMAL_EXAM or req.exam_start is None:
-            continue
-        if not req.exam_date or req.exam_date not in DATE_TO_DAY:
-            continue
-        exam_day = DATE_TO_DAY[req.exam_date]
-        sheet = _resolve_sheet(req.exam_date, exam_day)
-        exam_set = set(resolve_needed_periods(req, exam_day))
-        for slot in req.slots:
-            if slot.day != exam_day or not slot.room:
-                continue
-            s, e = max(0, slot.start), min(14, slot.end)
-            for p in range(s, e + 1):
-                if p not in exam_set:
-                    result[(sheet, slot.room, p)] = (req.key, "부분해제")
-    return result
+    return compute_auto_released(
+        st.session_state.assignments,
+        requests,
+        DATE_TO_DAY,
+        DATE_TO_SHEET,
+        DAY_TO_SHEETS,
+    )
 
 
 def log_audit(action: str, subject: str = "", details: dict | None = None):

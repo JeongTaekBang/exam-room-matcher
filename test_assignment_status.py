@@ -13,6 +13,7 @@ from assignment_status import (
     LABEL_ROOM_SPLIT,
     LABEL_NORMAL_EXAM,
     _room_cap,
+    compute_auto_released,
     compute_status,
     extract_base_key,
 )
@@ -285,3 +286,147 @@ class TestExtractBaseKey:
         """중복 감지 #row suffix + 분반 suffix가 함께 있는 경우."""
         assert extract_base_key("과목-01#123") == "과목-01#123"
         assert extract_base_key("과목-01#123+2") == "과목-01#123"
+
+
+# ──────────────────────────────────────────────
+# compute_auto_released
+# ──────────────────────────────────────────────
+
+class TestComputeAutoReleased:
+    """자동 해제 도출 — 세 가지 파생 규칙."""
+
+    DATE = datetime.date(2026, 4, 21)
+    D2D = {DATE: "화"}
+    D2S = {DATE: "4.21.(화)"}
+    DAY_TO_SHEETS = {"화": ["4.21.(화)"]}
+
+    def _req(self, category, **kw):
+        defaults = dict(
+            row=1, department="D", name="N", ban="01", professor="P",
+            students=30, schedule_raw="", slots=[], room="",
+            exam_date=self.DATE, exam_start=2, exam_end=3,
+            room_choice=None, remarks="",
+        )
+        defaults.update(kw)
+        r = ExamRequest(**defaults)
+        r.category = category
+        return r
+
+    # 규칙 1: ROOM_CHANGE 배정 → 원래 강의실 해제
+    def test_room_change_releases_original(self):
+        asgn = {
+            "과목-01": {
+                "room": "B", "sheet": "4.21.(화)", "periods": [2, 3],
+                "original_room": "A", "category": LABEL_ROOM_CHANGE,
+            }
+        }
+        result = compute_auto_released(asgn, [], self.D2D, self.D2S, self.DAY_TO_SHEETS)
+        assert result == {
+            ("4.21.(화)", "A", 2): ("과목-01", "이동"),
+            ("4.21.(화)", "A", 3): ("과목-01", "이동"),
+        }
+
+    def test_room_change_same_room_no_release(self):
+        """같은 강의실로 배정된 경우 해제하지 않음."""
+        asgn = {
+            "과목-01": {
+                "room": "A", "sheet": "4.21.(화)", "periods": [2, 3],
+                "original_room": "A", "category": LABEL_ROOM_CHANGE,
+            }
+        }
+        result = compute_auto_released(asgn, [], self.D2D, self.D2S, self.DAY_TO_SHEETS)
+        assert result == {}
+
+    # 규칙 1: 분반(keep_orig=False) → 원래 강의실 해제
+    def test_split_no_keep_releases_original(self):
+        asgn = {
+            "과목-01+1": {
+                "room": "B", "sheet": "4.21.(화)", "periods": [2],
+                "original_room": "A", "category": LABEL_ROOM_SPLIT,
+                "keep_orig": False,
+            }
+        }
+        result = compute_auto_released(asgn, [], self.D2D, self.D2S, self.DAY_TO_SHEETS)
+        assert result == {("4.21.(화)", "A", 2): ("과목-01+1", "이동")}
+
+    def test_split_keep_orig_no_release(self):
+        """기존 강의실 유지 분반은 원래 강의실 해제하지 않음."""
+        asgn = {
+            "과목-01+1": {
+                "room": "B", "sheet": "4.21.(화)", "periods": [2],
+                "original_room": "A", "category": LABEL_ROOM_SPLIT,
+                "keep_orig": True,
+            }
+        }
+        result = compute_auto_released(asgn, [], self.D2D, self.D2S, self.DAY_TO_SHEETS)
+        assert result == {}
+
+    # 규칙 2: NO_EXAM + exam_date 있음 → 시험일 강의실 해제
+    def test_no_exam_with_date(self):
+        req = self._req(
+            Category.NO_EXAM,
+            slots=[ScheduleSlot("화", 2, 3, "A")],
+            room="A",
+        )
+        result = compute_auto_released({}, [req], self.D2D, self.D2S, self.DAY_TO_SHEETS)
+        assert result == {
+            ("4.21.(화)", "A", 2): (req.key, "미실시"),
+            ("4.21.(화)", "A", 3): (req.key, "미실시"),
+        }
+
+    # 규칙 2: NO_EXAM + exam_date 없음 + 다주차 → 같은 요일 모든 시트
+    def test_no_exam_no_date_multi_week(self):
+        """exam_date가 없으면 day_to_sheets의 모든 시트에 적용."""
+        req = self._req(
+            Category.NO_EXAM,
+            exam_date=None, exam_start=None, exam_end=None,
+            slots=[ScheduleSlot("화", 2, 3, "A")],
+        )
+        day_to_sheets = {"화": ["4.15.(화)", "4.22.(화)"]}
+        result = compute_auto_released({}, [req], {}, {}, day_to_sheets)
+        assert result == {
+            ("4.15.(화)", "A", 2): (req.key, "미실시"),
+            ("4.15.(화)", "A", 3): (req.key, "미실시"),
+            ("4.22.(화)", "A", 2): (req.key, "미실시"),
+            ("4.22.(화)", "A", 3): (req.key, "미실시"),
+        }
+
+    # 규칙 3: NORMAL_EXAM + 시험교시 < 수업교시 → 미사용 교시 부분해제
+    def test_normal_exam_partial_release(self):
+        """수업 2~5교시, 시험 2~3교시 → 4·5교시 부분해제."""
+        req = self._req(
+            Category.NORMAL_EXAM,
+            slots=[ScheduleSlot("화", 2, 5, "A")],
+            exam_start=2, exam_end=3,
+        )
+        result = compute_auto_released({}, [req], self.D2D, self.D2S, self.DAY_TO_SHEETS)
+        assert result == {
+            ("4.21.(화)", "A", 4): (req.key, "부분해제"),
+            ("4.21.(화)", "A", 5): (req.key, "부분해제"),
+        }
+
+    def test_normal_exam_no_partial_when_exam_covers_class(self):
+        """시험 교시 = 수업 교시면 부분해제 없음."""
+        req = self._req(
+            Category.NORMAL_EXAM,
+            slots=[ScheduleSlot("화", 2, 3, "A")],
+            exam_start=2, exam_end=3,
+        )
+        result = compute_auto_released({}, [req], self.D2D, self.D2S, self.DAY_TO_SHEETS)
+        assert result == {}
+
+    def test_normal_exam_no_exam_start_no_release(self):
+        """시험 시작교시 미명시면 부분해제 안 함."""
+        req = self._req(
+            Category.NORMAL_EXAM,
+            slots=[ScheduleSlot("화", 2, 5, "A")],
+            exam_start=None, exam_end=None,
+        )
+        result = compute_auto_released({}, [req], self.D2D, self.D2S, self.DAY_TO_SHEETS)
+        assert result == {}
+
+    # 카테고리 외 무시
+    def test_skip_category_ignored(self):
+        req = self._req(Category.SKIP)
+        result = compute_auto_released({}, [req], self.D2D, self.D2S, self.DAY_TO_SHEETS)
+        assert result == {}
