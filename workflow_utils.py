@@ -8,6 +8,7 @@ from __future__ import annotations
 import datetime
 import json
 import logging
+import re
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -68,6 +69,43 @@ def resolve_needed_periods(req, exam_day: str) -> list[int]:
         for p in range(start_p, end_p + 1):
             periods.add(p)
     return _clamp_periods(list(periods))
+
+
+_SHEET_WEEKDAY_RE = re.compile(r"\(([월화수목금토일])\)")
+
+
+def collect_extra_room_slots(
+    requests, sheet_name: str, existing_rooms,
+) -> dict[str, dict[int, str]]:
+    """수업시간표에는 있지만 시간표 엑셀에 없는 강의실의 점유 슬롯 수집.
+
+    sheet_name 끝의 ``(요일)`` 패턴(예: ``"4.21.(화)"``)에서 요일을 추출하고,
+    모든 요청의 슬롯 중 해당 요일이면서 ``existing_rooms`` 에 없는 강의실의
+    점유를 ``{room: {period: subject_key}}`` 형식으로 반환.
+
+    Args:
+        requests: ExamRequest 리스트. 각 요청의 ``slots`` 를 순회한다
+        sheet_name: ``"M.D.(요일)"`` 형식의 시트 이름
+        existing_rooms: 시간표 엑셀에 있는 강의실 집합 (set 또는 dict의 keys)
+
+    Returns:
+        ``{강의실 코드: {교시: 과목 키}}``. 시트 이름에서 요일을 못 찾거나
+        해당 요일의 시간표 외 슬롯이 없으면 ``{}``.
+    """
+    result: dict[str, dict[int, str]] = {}
+    m = _SHEET_WEEKDAY_RE.search(sheet_name)
+    if not m:
+        return result
+    weekday = m.group(1)
+    for req in requests:
+        for slot in req.slots:
+            if slot.day != weekday or not slot.room or slot.room in existing_rooms:
+                continue
+            result.setdefault(slot.room, {})
+            s, e = max(MIN_PERIOD, slot.start), min(MAX_PERIOD, slot.end)
+            for p in range(s, e + 1):
+                result[slot.room][p] = req.key
+    return result
 
 
 def _quarantine_corrupted(path: Path) -> Path | None:

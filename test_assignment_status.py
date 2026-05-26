@@ -14,6 +14,7 @@ from assignment_status import (
     LABEL_NORMAL_EXAM,
     _room_cap,
     compute_status,
+    extract_base_key,
 )
 
 
@@ -251,3 +252,36 @@ class TestCatLabels:
         assert LABEL_ROOM_SPLIT == CAT_LABELS[Category.ROOM_SPLIT]
         assert LABEL_ROOM_CHANGE == CAT_LABELS[Category.ROOM_CHANGE]
         assert LABEL_NORMAL_EXAM == CAT_LABELS[Category.NORMAL_EXAM]
+
+
+# ──────────────────────────────────────────────
+# extract_base_key
+# ──────────────────────────────────────────────
+
+class TestExtractBaseKey:
+    def test_no_split_suffix(self):
+        assert extract_base_key("영문학의이해-01") == "영문학의이해-01"
+
+    def test_with_split_suffix(self):
+        assert extract_base_key("영문학의이해-01+2") == "영문학의이해-01"
+        assert extract_base_key("영문학의이해-01+10") == "영문학의이해-01"
+
+    def test_plus_in_subject_name_no_split(self):
+        """과목명에 +가 있지만 분반 suffix 없는 경우."""
+        assert extract_base_key("C++-01") == "C++-01"
+        assert extract_base_key("A+B+C") == "A+B+C"
+
+    def test_plus_in_subject_name_with_split(self):
+        """과목명에 +가 있고 분반 suffix도 있는 경우 — 마지막 + 다음 정수만 분리."""
+        assert extract_base_key("C++-01+3") == "C++-01"
+        assert extract_base_key("A+B-01+5") == "A+B-01"
+
+    def test_plus_non_digit_suffix(self):
+        """+ 다음이 정수가 아니면 base로 인식하지 않음."""
+        assert extract_base_key("과목-01+abc") == "과목-01+abc"
+        assert extract_base_key("과목-01+") == "과목-01+"
+
+    def test_with_row_dedup_suffix(self):
+        """중복 감지 #row suffix + 분반 suffix가 함께 있는 경우."""
+        assert extract_base_key("과목-01#123") == "과목-01#123"
+        assert extract_base_key("과목-01#123+2") == "과목-01#123"

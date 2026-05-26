@@ -29,6 +29,25 @@ LABEL_SKIP = CAT_LABELS[Category.SKIP]
 # 헬퍼
 # ──────────────────────────────────────────────
 
+def extract_base_key(assignment_key: str) -> str:
+    """분반 키(``과목명-분반+N``)에서 기본 과목 키를 추출.
+
+    마지막 ``+`` 다음이 정수일 때만 그 앞부분을 base key로 반환한다.
+    과목명에 ``+`` 기호가 포함되어도 안전 (마지막 ``+`` 다음 정수 검증).
+    분반 suffix가 없으면 입력을 그대로 반환.
+
+    Examples:
+        "영문학의이해-01"      → "영문학의이해-01"
+        "영문학의이해-01+2"    → "영문학의이해-01"
+        "C++-01"               → "C++-01"   (+ 다음이 정수 아님)
+        "C++-01+3"             → "C++-01"
+    """
+    i = assignment_key.rfind("+")
+    if i > 0 and assignment_key[i + 1:].isdigit():
+        return assignment_key[:i]
+    return assignment_key
+
+
 def _room_cap(room_capacity: dict | None, room: str) -> int:
     """room_capacity에서 강의실 수용인원을 안전하게 int로 추출."""
     if not room_capacity or not room:

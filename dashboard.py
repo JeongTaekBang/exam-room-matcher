@@ -28,6 +28,7 @@ from data_loader import (
 from workflow_utils import (
     StaleFileError,
     append_audit_event,
+    collect_extra_room_slots,
     load_assignments,
     load_releases,
     read_audit_events,
@@ -54,6 +55,7 @@ from assignment_status import (
     LABEL_SKIP,
     _room_cap,
     compute_status,
+    extract_base_key,
 )
 CAT_COLORS = {
     Category.NORMAL_EXAM: "#4472C4",
@@ -429,9 +431,7 @@ def _build_day_verification(day, requests, timetable_data, assignments,
         if a["sheet"] != day:
             continue
         is_split = a.get("category") == LABEL_ROOM_SPLIT
-        # 분반 키에서 기본키 추출: 마지막 "+"만 분리 (과목명에 +가 포함될 수 있음)
-        _plus_idx = key.rfind("+")
-        base_key = key[:_plus_idx] if _plus_idx > 0 and key[_plus_idx + 1:].isdigit() else key
+        base_key = extract_base_key(key)
 
         if is_split and a.get("keep_orig", True):
             orig = a.get("original_room", "")
@@ -481,10 +481,7 @@ def _build_day_verification(day, requests, timetable_data, assignments,
 
     for (room, p), keys in assignment_map.items():
         # 같은 과목의 분반 배정끼리는 충돌이 아님 (기본키 기준 그룹핑)
-        def _base_key(k):
-            i = k.rfind("+")
-            return k[:i] if i > 0 and k[i + 1:].isdigit() else k
-        base_keys = {_base_key(k) for k in keys}
+        base_keys = {extract_base_key(k) for k in keys}
         if len(base_keys) <= 1:
             continue
         if len(keys) > 1:
@@ -1053,19 +1050,8 @@ with tab2:
                 rel_day = st.selectbox("일자", SHEET_ORDER, index=_rel_default_day_idx, key="rel_day")
                 raw_rel = timetable_data.get(rel_day, {})
 
-                # 시간표 + 수업시간표 슬롯 합산
-                _rel_extra: dict[str, dict[int, str]] = {}
-                _rel_weekday_m = re.search(r"\(([월화수목금토일])\)", rel_day)
-                if _rel_weekday_m:
-                    _rel_wd = _rel_weekday_m.group(1)
-                    for _rr in requests:
-                        for _rs in _rr.slots:
-                            if _rs.day != _rel_wd or not _rs.room or _rs.room in raw_rel:
-                                continue
-                            _rel_extra.setdefault(_rs.room, {})
-                            s, e = max(0, _rs.start), min(14, _rs.end)
-                            for _rp in range(s, e + 1):
-                                _rel_extra[_rs.room][_rp] = _rr.key
+                # 시간표 외 강의실(수업시간표에만 있는)의 점유 슬롯 수집
+                _rel_extra = collect_extra_room_slots(requests, rel_day, raw_rel)
 
                 occupied_rooms = sorted(
                     set(r for r in raw_rel if raw_rel[r]) | set(_rel_extra.keys())
@@ -1146,19 +1132,8 @@ with tab2:
                 _grid_raw = timetable_data.get(_grid_sheet, {})
                 _grid_periods = resolve_needed_periods(sel_req, _grid_day)
                 if _grid_periods:
-                    # 시간표 외 강의실 점유 수집
-                    _grid_extra: dict[str, dict[int, str]] = {}
-                    _grid_wd_m = re.search(r"\(([월화수목금토일])\)", _grid_sheet)
-                    if _grid_wd_m:
-                        _grid_wd = _grid_wd_m.group(1)
-                        for _gr in requests:
-                            for _gs in _gr.slots:
-                                if _gs.day != _grid_wd or not _gs.room or _gs.room in _grid_raw:
-                                    continue
-                                _grid_extra.setdefault(_gs.room, {})
-                                _gs_s, _gs_e = max(0, _gs.start), min(14, _gs.end)
-                                for _gp in range(_gs_s, _gs_e + 1):
-                                    _grid_extra[_gs.room][_gp] = _gr.key
+                    # 시간표 외 강의실(수업시간표에만 있는)의 점유 슬롯 수집
+                    _grid_extra = collect_extra_room_slots(requests, _grid_sheet, _grid_raw)
                     _grid_html = render_availability_grid(
                         _grid_raw, room_capacity, _grid_periods, 0,
                         st.session_state.assignments, _grid_sheet, all_released_slots,

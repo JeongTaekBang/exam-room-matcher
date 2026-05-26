@@ -9,6 +9,7 @@ from workflow_utils import (
     MAX_PERIOD,
     _clamp_periods,
     append_audit_event,
+    collect_extra_room_slots,
     load_assignments,
     load_releases,
     read_audit_events,
@@ -269,3 +270,66 @@ def test_releases_to_slot_set():
         ("4.23.(목)", "N405", 9),
         ("4.21.(화)", "K101", 3),
     }
+
+
+# ──────────────────────────────────────────────
+# collect_extra_room_slots
+# ──────────────────────────────────────────────
+
+def _req_with_slots(name: str, ban: str, slots: list[ScheduleSlot]):
+    """헬퍼: name/ban으로 key를 만드는 가벼운 ExamRequest.
+    ExamRequest.__post_init__이 key를 f"{name}-{ban}"로 강제 설정한다."""
+    return ExamRequest(
+        row=1, department="D", name=name, ban=ban, professor="P",
+        students=30, schedule_raw="", slots=slots, room="",
+        exam_date=None, exam_start=None, exam_end=None,
+        room_choice=None, remarks="",
+    )
+
+
+def test_collect_extra_room_slots_basic():
+    """시간표에 없는 강의실의 슬롯만 수집."""
+    reqs = [
+        _req_with_slots("과목A", "01", [ScheduleSlot("화", 2, 3, "EXTRA1")]),
+        _req_with_slots("과목B", "01", [ScheduleSlot("화", 4, 5, "K106")]),  # 시간표에 있음
+    ]
+    existing = {"K106"}
+    result = collect_extra_room_slots(reqs, "4.21.(화)", existing)
+    assert result == {"EXTRA1": {2: "과목A-01", 3: "과목A-01"}}
+
+
+def test_collect_extra_room_slots_filters_by_weekday():
+    """요청 슬롯의 요일이 시트 요일과 다르면 무시."""
+    reqs = [
+        _req_with_slots("과목A", "01", [ScheduleSlot("수", 2, 3, "EXTRA1")]),
+    ]
+    result = collect_extra_room_slots(reqs, "4.21.(화)", set())
+    assert result == {}
+
+
+def test_collect_extra_room_slots_clamps_periods():
+    """슬롯 범위가 0~14를 벗어나면 클램프."""
+    reqs = [
+        _req_with_slots("과목A", "01", [ScheduleSlot("화", -2, 16, "EXTRA1")]),
+    ]
+    result = collect_extra_room_slots(reqs, "4.21.(화)", set())
+    assert result == {"EXTRA1": {p: "과목A-01" for p in range(0, 15)}}
+
+
+def test_collect_extra_room_slots_invalid_sheet_name():
+    """요일 패턴이 없는 시트 이름이면 빈 dict."""
+    reqs = [_req_with_slots("과목", "01", [ScheduleSlot("화", 2, 3, "EXTRA1")])]
+    assert collect_extra_room_slots(reqs, "summary", set()) == {}
+
+
+def test_collect_extra_room_slots_empty_room_skipped():
+    """슬롯의 room이 빈 문자열이면 무시."""
+    reqs = [_req_with_slots("과목", "01", [ScheduleSlot("화", 2, 3, "")])]
+    assert collect_extra_room_slots(reqs, "4.21.(화)", set()) == {}
+
+
+def test_collect_extra_room_slots_accepts_dict_as_existing():
+    """existing_rooms는 set 또는 dict의 keys 모두 허용 (in 비교만 사용)."""
+    reqs = [_req_with_slots("과목", "01", [ScheduleSlot("화", 2, 3, "K106")])]
+    # dict의 in 비교는 키 검사
+    assert collect_extra_room_slots(reqs, "4.21.(화)", {"K106": {}}) == {}
