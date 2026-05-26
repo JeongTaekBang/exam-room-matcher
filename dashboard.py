@@ -1350,7 +1350,15 @@ with tab2:
                         })
                         st.rerun()
                 elif needed_periods:
-                    st.info(f"{search_cap}명 이상 강의실이 없습니다. 아래 '조건 직접 검색'에서 수용인원을 낮춰 검색하세요.")
+                    _hint = (
+                        f"{search_cap}명 이상 수용 가능한 빈 강의실이 없습니다.\n\n"
+                        "다음을 시도해보세요:\n"
+                        "- 아래 **조건 직접 검색**에서 최소 수용인원을 더 낮춤"
+                    )
+                    if is_split:
+                        _hint += " (분반은 0도 가능 — 작은 강의실 여러 개로 분할)"
+                    _hint += "\n- 교시 범위를 좁혀 검색 (예: 시험이 일부 교시만)"
+                    st.info(_hint)
 
                 with st.expander("조건 직접 검색"):
                     mc1, mc2 = st.columns(2)
@@ -1395,7 +1403,17 @@ with tab2:
                             })
                             st.rerun()
                     else:
-                        st.warning("없음")
+                        _cap_part = f", {m_cap}명+" if m_cap else ""
+                        st.warning(
+                            f"선택 조건({m_period[0]}~{m_period[-1]}교시{_cap_part})에 "
+                            "맞는 빈 강의실이 없습니다.\n\n"
+                            "다음 중 하나를 시도해보세요:\n"
+                            "- 최소 수용인원을 더 낮춰서 다시 검색 "
+                            "(분반은 0으로도 가능 — 작은 강의실 여러 개로 분할)\n"
+                            "- 교시 범위를 더 좁혀서 다시 검색 "
+                            "(예: 2~3교시 → 2교시만)\n"
+                            "- 그래도 안 되면 시험 시간 자체를 요청자와 협의"
+                        )
             else:
                 st.warning("시험일자 정보가 없어 자동 검색이 불가합니다.")
     elif target_reqs:
