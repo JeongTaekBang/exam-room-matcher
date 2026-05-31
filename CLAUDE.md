@@ -20,12 +20,14 @@ exam_room_matcher/
 ├── data_loader.py             # 엑셀 파싱 + 요청 분류
 ├── workflow_utils.py          # 영속화 + 감사 로그 + 손상 격리
 ├── assignment_status.py       # 배정 상태 판정 + Category 라벨
+├── conflict_check.py          # 원본 '요청사항 처리'(P열) 강의실 중복 점검
 ├── dashboard.py               # Streamlit 대시보드 (5탭)
 ├── doc/                       # 산수·설계·사용 가이드
 ├── run.bat                    # 더블클릭 실행
 ├── test_data_loader.py        # 단위 테스트
 ├── test_workflow_utils.py
-└── test_assignment_status.py
+├── test_assignment_status.py
+└── test_conflict_check.py
 ```
 
 ## Commands
@@ -44,17 +46,22 @@ pip install openpyxl streamlit pandas pytest
 
 ## Architecture
 
-`data_loader.py` — 엑셀 2개를 읽어 구조화된 데이터로 변환. 요청 분류는 여기서 수행하지만 배정 자체 로직은 없음. room_choice·NO_EXAM 키워드는 공백을 모두 제거해 정규화 후 비교 (`_normalize_choice`).
+`data_loader.py` — 엑셀 2개를 읽어 구조화된 데이터로 변환. 요청 분류는 여기서 수행하지만 배정 자체 로직은 없음. room_choice·NO_EXAM 키워드는 공백을 모두 제거해 정규화 후 비교 (`_normalize_choice`). `load_requests`는 첫 시트(공통)만 읽지만, `load_course_exam_index`는 **모든 시트(공통+전공)** 에서 `(교과목명, 정규화분반)`별 시험일·교시·미실시여부를 모아 ② 시간표 점유자 검증에 쓴다(`normalize_ban`로 분반 표기차 흡수). `load_all` 결과에 `course_exam_index` 포함.
 
 `workflow_utils.py` — 배정/해제 JSON 영속화 (원자적 저장 tempfile→rename), 감사 로그 JSONL, 시험 교시 계산, 동시 작업 보호 (`StaleFileError`), 손상된 JSON의 `.corrupted-*.bak` 자동 격리 (`_quarantine_corrupted`).
 
-`assignment_status.py` — 배정 상태 판정의 순수 함수 (`compute_status`, `_room_cap`, `CAT_LABELS`, `LABEL_*` 상수). dashboard.py에서 분리 — UI 의존성 없이 단위 테스트 가능. assignments JSON의 `category` 필드 값으로 `CAT_LABELS`가 단일 출처.
+`assignment_status.py` — 배정 상태 판정의 순수 함수 (`compute_status`, `_room_cap`, `CAT_LABELS`, `LABEL_*` 상수). dashboard.py에서 분리 — UI 의존성 없이 단위 테스트 가능. assignments JSON의 `category` 필드 값으로 `CAT_LABELS`가 단일 출처. `resolve_processed_room(req, assignments)` — 요청의 최종 강의실 결정을 P열(`요청사항 처리`) 문자열로 환원(배정→강의실, 분반→콤마결합, NO_EXAM→`강의실 미사용`, NORMAL_EXAM→`req.room`, 그 외→빈 문자열). 내보내기에서 P열 자동 채움에 사용.
+
+`conflict_check.py` — 요청 엑셀 P열(16번째, `요청사항 처리`)에 사람이 미리 적은 배정 결정을 읽기 전용으로 감사하는 순수 함수. 프로그램 내부 배정(`_assignments.json`)과 무관. 두 검사:
+- `detect_processed_room_conflicts` — **P열↔P열**: 같은 시험일자+강의실에 교시(`exam_start`~`exam_end`)가 겹치는 다른 교과목을 이중 배정으로 검출. 같은 과목명 분반은 형제로 제외, 비강의실 마커(`강의실 미사용`·`확인필요`·빈칸)는 제외, 날짜/교시 누락 행은 `unjudged`로 분리.
+- `detect_timetable_overlaps` — **P열↔기존 시간표**: P열 강의실이 그 시험일·교시에 `timetable_data` 점유와 겹치는지 교차 검사. **시험주간 점유는 정상 수업이 아니라 '시험' 기준**이다 — `occupant_index`(`load_course_exam_index`)로 점유자가 그 날 실제로 그 방에서 시험을 보는지 검증해, 사용 안함·시험일 없음·다른 날·교시 안 겹침이면 비운 것으로 본다(공통만 배정하므로 전공이 사용 안함이면 그 방을 공통에 배정 가능). 자기 수업 슬롯(`req.slots`)·해제 슬롯(`all_released_slots`)·같은 교과목 분반도 제외.
+- 공통 헬퍼 `parse_processed_rooms`(콤마 분리 + 마커 제외), `_parse_occupant`(시간표 셀의 `과목명-분반`/`과목명분반`/`시험(원래): 과목명-분반` 등 다양한 표기에서 `(과목명, 분반)` 추출).
 
 `dashboard.py` — Streamlit 5탭 (업무 흐름 순서):
 1. **기존 시간표** — 원본 격자 (갈색/청록)
 2. **배정 작업** — 진행 요약 + 필터/검색 + 히트맵 + 수급현황 + 미배정→배정(이동/분반/기존유지) + 해제 + 점유현황 격자 + 작업현황
-3. **배정 현황** — 진행 요약 + 필터/검색 + 검수 큐 + 완료 목록 + 내보내기/이력
-4. **결과 검증** — 요청+배정 오버레이 + 충돌 감지 (빨간 경고)
+3. **배정 현황** — 진행 요약 + 필터/검색 + 검수 큐 + 완료 목록 + 내보내기/이력 (배정 결과를 P열에 채운 **요청 엑셀 사본 다운로드** 포함 — `generate_request_with_processed`, 버튼 클릭 시 생성)
+4. **결과 검증** — 상단: 원본 P열(`요청사항 처리`) 강의실 점검(읽기 전용 감사 — ①P열 이중배정 ②기존 시간표 겹침 ③날짜/교시 누락) + 요청+배정 오버레이 + 충돌 감지 (빨간 경고)
 5. **통계** — 분류별/일별/가동률
 
 ## Key Concepts

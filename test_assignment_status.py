@@ -16,6 +16,7 @@ from assignment_status import (
     compute_auto_released,
     compute_status,
     extract_base_key,
+    resolve_processed_room,
 )
 
 
@@ -430,3 +431,50 @@ class TestComputeAutoReleased:
         req = self._req(Category.SKIP)
         result = compute_auto_released({}, [req], self.D2D, self.D2S, self.DAY_TO_SHEETS)
         assert result == {}
+
+
+class TestResolveProcessedRoom:
+    """P열(요청사항 처리) 채움용 강의실 결정 문자열."""
+
+    def test_normal_exam_returns_room(self):
+        req = _make_req(room="K106")
+        req.category = Category.NORMAL_EXAM
+        assert resolve_processed_room(req, {}) == "K106"
+
+    def test_no_exam_returns_marker(self):
+        req = _make_req()
+        req.category = Category.NO_EXAM
+        assert resolve_processed_room(req, {}) == "강의실 미사용"
+
+    def test_room_change_assigned(self):
+        req = _make_req(name="가", ban="01")  # key = "가-01"
+        req.category = Category.ROOM_CHANGE
+        assert resolve_processed_room(req, {"가-01": {"room": "N212"}}) == "N212"
+
+    def test_room_change_unassigned_blank(self):
+        req = _make_req()
+        req.category = Category.ROOM_CHANGE
+        assert resolve_processed_room(req, {}) == ""
+
+    def test_room_split_joins_rooms(self):
+        req = _make_req(name="가", ban="01")
+        req.category = Category.ROOM_SPLIT
+        assigns = {"가-01": {"room": "N210"}, "가-01+2": {"room": "N405"}}
+        assert resolve_processed_room(req, assigns) == "N210,N405"
+
+    def test_split_dedup_rooms(self):
+        req = _make_req(name="가", ban="01")
+        req.category = Category.ROOM_SPLIT
+        assigns = {"가-01": {"room": "N210"}, "가-01+2": {"room": "N210"}}
+        assert resolve_processed_room(req, assigns) == "N210"
+
+    def test_skip_blank(self):
+        req = _make_req()
+        req.category = Category.SKIP
+        assert resolve_processed_room(req, {}) == ""
+
+    def test_assignment_overrides_category_default(self):
+        # 배정이 있으면 카테고리 기본값(NORMAL_EXAM의 req.room)보다 우선
+        req = _make_req(name="가", ban="01", room="K106")
+        req.category = Category.NORMAL_EXAM
+        assert resolve_processed_room(req, {"가-01": {"room": "N999"}}) == "N999"

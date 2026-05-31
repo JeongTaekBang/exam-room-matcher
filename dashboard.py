@@ -38,6 +38,10 @@ from workflow_utils import (
     save_assignments,
     save_releases,
 )
+from conflict_check import (
+    detect_processed_room_conflicts,
+    detect_timetable_overlaps,
+)
 
 ROOT = Path(__file__).resolve().parent
 ASSIGNMENTS_FILENAME = "_assignments.json"
@@ -45,6 +49,29 @@ RELEASES_FILENAME = "_releases.json"
 AUDIT_LOG_FILENAME = "_assignment_audit.jsonl"
 
 st.set_page_config(page_title="강의실 배정 프로그램", layout="wide")
+
+# ── Streamlit 버전 호환 ──
+# 1.49+는 st.dataframe(**_STRETCH)를 받지만, 그 이전 버전(예: run.bat이
+# 실행하는 conda base의 1.47)은 width에 정수만 허용해 "stretch" 문자열에서
+# TypeError가 난다. 설치된 버전에 맞춰 인자를 자동 선택한다.
+def _st_version_tuple():
+    parts = []
+    for chunk in st.__version__.split(".")[:3]:
+        digits = ""
+        for ch in chunk:
+            if ch.isdigit():
+                digits += ch
+            else:
+                break
+        parts.append(int(digits) if digits else 0)
+    return tuple(parts)
+
+
+_STRETCH = (
+    {"width": "stretch"}
+    if _st_version_tuple() >= (1, 49)
+    else {"use_container_width": True}
+)
 
 from assignment_status import (
     CAT_LABELS,
@@ -57,6 +84,7 @@ from assignment_status import (
     compute_auto_released,
     compute_status,
     extract_base_key,
+    resolve_processed_room,
 )
 CAT_COLORS = {
     Category.NORMAL_EXAM: "#4472C4",
@@ -93,8 +121,31 @@ def scan_folders():
 
 
 @st.cache_data(show_spinner="데이터 로딩 중...")
-def cached_load(req_path: str, tt_path: str, _req_mtime: float = 0, _tt_mtime: float = 0):
+def cached_load(req_path: str, tt_path: str, req_mtime: float = 0, tt_mtime: float = 0):
+    # req_mtime/tt_mtime은 캐시 키 일부 — 엑셀 파일이 바뀌면(요청사항/P열 수정 등)
+    # mtime이 달라져 캐시가 자동 무효화된다. (밑줄 접두 인자는 st.cache_data가
+    # 해시에서 제외하므로 절대 밑줄을 붙이면 안 된다.)
     return load_all(req_path, tt_path)
+
+
+def generate_request_with_processed(req_path: str, requests, assignments) -> bytes:
+    """원본 요청 엑셀의 P열(16열, '요청사항 처리')에 프로그램 배정 결과를 채운
+    사본을 bytes로 반환한다.
+
+    배정/시험/미실시로 **확정된 행만** P열을 덮어쓰고, 미확정 행(미배정 변경·분반,
+    미확정)은 원본 셀 값을 그대로 보존해 사용자가 직접 입력할 여지를 남긴다.
+    다운로드용 사본만 만들며 원본 파일은 변경하지 않는다.
+    """
+    wb = _openpyxl.load_workbook(req_path)
+    ws = wb[wb.sheetnames[0]]  # load_requests와 동일하게 첫 시트(공통) 기준
+    for req in requests:
+        value = resolve_processed_room(req, assignments)
+        if value:  # 빈 결과는 기존 값 보존
+            ws.cell(row=req.row, column=16, value=value)
+    buf = io.BytesIO()
+    wb.save(buf)
+    wb.close()
+    return buf.getvalue()
 
 
 def render_timetable_html(room_data: dict, color_map: dict, room_capacity: dict,
@@ -547,8 +598,8 @@ with st.sidebar:
 _cur_req_mtime = req_file.stat().st_mtime
 _cur_tt_mtime = tt_file.stat().st_mtime
 data = cached_load(str(req_file), str(tt_file),
-                   _req_mtime=_cur_req_mtime,
-                   _tt_mtime=_cur_tt_mtime)
+                   req_mtime=_cur_req_mtime,
+                   tt_mtime=_cur_tt_mtime)
 requests = data["requests"]
 room_capacity = data["room_capacity"]
 timetable_data = data["timetable_data"]
@@ -855,7 +906,7 @@ with tab2:
                     return "background-color: #88CC88;"
             return ""
 
-        st.dataframe(df_heat.style.map(color_cell), width="stretch", height=220)
+        st.dataframe(df_heat.style.map(color_cell), **_STRETCH, height=220)
         st.caption("빨강=0~3개 (부족) / 노랑=4~10개 / 초록=11개+ (여유)")
 
         # ── 교시별 수급 현황 ──
@@ -894,7 +945,7 @@ with tab2:
 
         st.markdown("**교시별 수급 현황**")
         st.dataframe(df_sd.style.map(_color_sd, subset=pd.IndexSlice["부족분", :]),
-                     width="stretch", height=140)
+                     **_STRETCH, height=140)
 
         # ── 교시별 빈 강의실 상세 ──
         with st.expander("빈 강의실 상세 보기"):
@@ -919,7 +970,7 @@ with tab2:
                 status = "해제됨" if (occupied and is_released) else "빈 강의실"
                 det_rows.append({"강의실": room, "수용인원": cap, "상태": status})
             if det_rows:
-                st.dataframe(pd.DataFrame(det_rows), width="stretch", hide_index=True)
+                st.dataframe(pd.DataFrame(det_rows), **_STRETCH, hide_index=True)
             else:
                 st.warning("해당 조건의 빈 강의실이 없습니다.")
 
@@ -964,7 +1015,7 @@ with tab2:
                 "기배정": f"{_sc}건" if _sc else "",
                 "요청사항": req.remarks,
             })
-        st.dataframe(pd.DataFrame(target_rows), width="stretch", hide_index=True, height=200)
+        st.dataframe(pd.DataFrame(target_rows), **_STRETCH, hide_index=True, height=200)
 
         # 배정 패널
         options = [f"{r.key} | {r.students}명 | {CAT_LABELS[r.category]}"
@@ -1269,7 +1320,7 @@ with tab2:
                                             all_released_slots)
                     if m_free:
                         st.dataframe(pd.DataFrame(m_free, columns=["강의실", "수용인원"]),
-                                     width="stretch", hide_index=True)
+                                     **_STRETCH, hide_index=True)
                         m_room_options = [f"{r} (수용 {c}명)" for r, c in m_free]
                         m_room_idx = st.selectbox("강의실 선택", range(len(m_room_options)),
                                                   format_func=lambda i: m_room_options[i],
@@ -1403,7 +1454,7 @@ with tab3:
     st.markdown(f"### 검수 큐 ({len(_filtered_review)}건)")
     if _filtered_review:
         df_review = pd.DataFrame(_filtered_review)
-        st.dataframe(df_review, width="stretch", hide_index=True, height=220)
+        st.dataframe(df_review, **_STRETCH, hide_index=True, height=220)
         buf_review = io.BytesIO()
         df_review.to_excel(buf_review, index=False, engine="openpyxl")
         st.download_button("검수 큐 엑셀 다운로드", buf_review.getvalue(), "검수큐.xlsx",
@@ -1468,7 +1519,7 @@ with tab3:
     st.markdown(f"### 완료 ({len(completed_rows)}건)")
     if completed_rows:
         df_completed = pd.DataFrame(completed_rows)
-        st.dataframe(df_completed, width="stretch", hide_index=True, height=300)
+        st.dataframe(df_completed, **_STRETCH, hide_index=True, height=300)
         _buf_done = io.BytesIO()
         df_completed.to_excel(_buf_done, index=False, engine="openpyxl")
         st.download_button("완료 내역 엑셀 다운로드", _buf_done.getvalue(), "완료내역.xlsx",
@@ -1478,6 +1529,25 @@ with tab3:
 
     # ── 내보내기 + 작업 이력 ──
     with st.expander("내보내기 + 작업 이력"):
+        # ── 요청 엑셀에 배정 결과(P열) 채워 다운로드 ──
+        # 배정 결과를 '요청사항 처리'(P열)에 기입한 원본 양식 사본. 이후 사용자가
+        # 미확정 행을 직접 입력하고 → 결과 검증 탭에서 충돌을 최종 점검한다.
+        st.markdown("**요청사항 처리(P열) 채운 요청 엑셀**")
+        st.caption("원본 요청 엑셀 양식 그대로, P열에 프로그램 배정 결과를 기입한 사본입니다. "
+                   "배정·시험·미실시로 확정된 행만 채우고 미확정 행은 비워 둬 직접 입력할 수 있습니다. "
+                   "원본 파일은 바뀌지 않습니다.")
+        if st.button("P열 채운 요청 엑셀 만들기", key="u_gen_p_export"):
+            st.session_state._p_export_bytes = generate_request_with_processed(
+                str(req_file), requests, st.session_state.assignments)
+        if st.session_state.get("_p_export_bytes"):
+            st.download_button(
+                "다운로드 (요청_P열채움.xlsx)",
+                data=st.session_state._p_export_bytes,
+                file_name=f"{req_file.stem}_P열채움.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
+        st.markdown("---")
+
         if st.session_state.assignments:
             export_rows = []
             for key, a in st.session_state.assignments.items():
@@ -1491,7 +1561,7 @@ with tab3:
                     "교시": str(a["periods"]),
                 })
             df_assigned = pd.DataFrame(export_rows)
-            st.dataframe(df_assigned, width="stretch", hide_index=True)
+            st.dataframe(df_assigned, **_STRETCH, hide_index=True)
 
             c1, c2, c3 = st.columns(3)
             csv = df_assigned.to_csv(index=False).encode("utf-8-sig")
@@ -1530,7 +1600,7 @@ with tab3:
                     "과목": e.get("subject", ""),
                     "세부": format_audit_details(e.get("details")),
                 })
-            st.dataframe(pd.DataFrame(audit_rows), width="stretch", hide_index=True, height=220)
+            st.dataframe(pd.DataFrame(audit_rows), **_STRETCH, hide_index=True, height=220)
         else:
             st.caption("이력이 없습니다.")
 
@@ -1538,6 +1608,77 @@ with tab3:
 # ── 탭 4: 요청 시간표 + 충돌 감지 ──
 with tab4:
     st.subheader("결과 검증 (충돌 감지)")
+
+    # ── 원본 '요청사항 처리'(P열) 강의실 배정 점검 (읽기 전용 감사) ──
+    # 요청 엑셀 P열에 사람이 미리 적은 배정 결정을 감사한다. 두 종류를 본다:
+    #   (1) P열↔P열  — 같은 시험일자·강의실에 교시가 겹치는 다른 과목 (이중 배정)
+    #   (2) P열↔시간표 — P열 강의실이 기존 수업시간표 점유와 겹침 (해제·자기수업 제외)
+    # 프로그램 내부 배정(_assignments.json)·수업시간표 파생 강의실과는 별개.
+    _proc_conflicts, _proc_unjudged = detect_processed_room_conflicts(requests)
+    _tt_overlaps = detect_timetable_overlaps(
+        requests, timetable_data, DATE_TO_SHEET, DATE_TO_DAY, all_released_slots,
+        occupant_index=data.get("course_exam_index"))
+    with st.container(border=True):
+        st.markdown("**원본 '요청사항 처리'(P열) 강의실 점검**")
+        st.caption("요청 엑셀 P열에 미리 적힌 배정 결정 감사 — 같은 과목 분반끼리는 충돌이 아닙니다. "
+                   "해제(자동/수동)되었거나 자기 강의실에서 보는 시험은 제외합니다.")
+
+        # (1) P열 ↔ P열 이중 배정
+        if _proc_conflicts:
+            st.error(f"① 강의실 이중 배정 {len(_proc_conflicts)}건 — 같은 날·강의실·교시에 다른 과목")
+            _df_pc = pd.DataFrame([{
+                "시험일자": c.exam_date.isoformat(),
+                "강의실": c.room,
+                "과목 A": f"{c.req_a.name}({c.req_a.ban}) "
+                          f"{c.req_a.exam_start}~{c.req_a.exam_end}교시",
+                "행 A": c.req_a.row,
+                "과목 B": f"{c.req_b.name}({c.req_b.ban}) "
+                          f"{c.req_b.exam_start}~{c.req_b.exam_end}교시",
+                "행 B": c.req_b.row,
+            } for c in _proc_conflicts])
+            st.dataframe(_df_pc, hide_index=True, **_STRETCH)
+        else:
+            st.success("① 강의실 이중 배정 없음")
+
+        # (2) P열 ↔ 기존 수업시간표 겹침
+        if _tt_overlaps:
+            _ov_groups = {}
+            for o in _tt_overlaps:
+                g = _ov_groups.setdefault(
+                    (o.exam_date, o.room, o.req.row),
+                    {"req": o.req, "room": o.room, "date": o.exam_date,
+                     "periods": [], "occupants": []})
+                g["periods"].append(o.period)
+                if o.occupant not in g["occupants"]:
+                    g["occupants"].append(o.occupant)
+            st.warning(f"② 기존 수업과 겹침 {len(_ov_groups)}건 — P열 강의실이 그 시간 시간표에 점유됨 (확인 필요)")
+            _df_ov = pd.DataFrame([{
+                "시험일자": g["date"].isoformat(),
+                "강의실": g["room"],
+                "과목": f"{g['req'].name}({g['req'].ban})",
+                "겹친 교시": ", ".join(f"{p}교시" for p in sorted(g["periods"])),
+                "기존 점유(시간표)": ", ".join(g["occupants"]),
+                "행": g["req"].row,
+            } for g in _ov_groups.values()])
+            st.dataframe(_df_ov, hide_index=True, **_STRETCH)
+        else:
+            st.success("② 기존 수업시간표와 겹침 없음")
+
+        # 정보 부족으로 판정 불가한 행 (강의실은 있으나 날짜/교시 누락)
+        if _proc_unjudged:
+            with st.expander(
+                f"확인 필요 — 강의실은 배정됐으나 날짜/교시 누락 {len(_proc_unjudged)}건"
+            ):
+                st.caption("아래 행은 정보 부족으로 충돌 판정에서 제외됨 — 원본 K·L·M열 보완 필요")
+                _df_un = pd.DataFrame([{
+                    "강의실": u.room,
+                    "과목": f"{u.req.name}({u.req.ban})",
+                    "사유": u.reason,
+                    "행": u.req.row,
+                } for u in _proc_unjudged])
+                st.dataframe(_df_un, hide_index=True, **_STRETCH)
+    st.divider()
+
     day3 = st.selectbox("일자", SHEET_ORDER, key="t3_day")
 
     full_data, full_color, full_tip, conflict_cells = _build_day_verification(
@@ -1682,7 +1823,7 @@ with tab5:
         filled = sum(len(periods) for periods in raw.values()) - released_count
         pct = round(filled / total * 100, 1) if total else 0
         util_rows.append({"일자": sn, "점유율(%)": pct, "사용": filled, "해제": released_count, "전체": total})
-    st.dataframe(pd.DataFrame(util_rows), width="stretch", hide_index=True)
+    st.dataframe(pd.DataFrame(util_rows), **_STRETCH, hide_index=True)
 
     st.markdown("---")
     m1, m2, m3, m4, m5 = st.columns(5)

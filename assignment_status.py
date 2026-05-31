@@ -114,6 +114,39 @@ def compute_auto_released(
     return result
 
 
+# '요청사항 처리'(P열)에 기입하는 미실시 표기 — 원본 데이터 표기와 동일하게 유지
+PROCESSED_NO_EXAM = "강의실 미사용"
+
+
+def resolve_processed_room(req, assignments: dict) -> str:
+    """요청의 최종 강의실 결정을 '요청사항 처리'(P열) 문자열로 반환한다.
+
+    우선순위:
+    1) 프로그램 배정(ROOM_CHANGE/ROOM_SPLIT)이 있으면 배정 강의실
+       — 분반(다중 배정)은 강의실을 콤마로 결합 (예: ``"N210,N405"``)
+    2) NO_EXAM → ``"강의실 미사용"``
+    3) NORMAL_EXAM → 시험 강의실(``req.room``)
+    4) 그 외(미배정 변경/분반, 미확정) → ``""``
+
+    빈 문자열은 "프로그램이 아직 결정하지 못함"을 뜻한다. 내보내기 호출자는
+    빈 값일 때 원본 셀을 덮어쓰지 않고 보존하여 수동 입력 여지를 남긴다.
+    """
+    keys = [k for k in assignments if k == req.key or k.startswith(req.key + "+")]
+    if keys:
+        rooms: list[str] = []
+        for k in sorted(keys):
+            room = str(assignments[k].get("room", "")).strip()
+            if room and room not in rooms:
+                rooms.append(room)
+        if rooms:
+            return ",".join(rooms)
+    if req.category == Category.NO_EXAM:
+        return PROCESSED_NO_EXAM
+    if req.category == Category.NORMAL_EXAM:
+        return (req.room or "").strip()
+    return ""
+
+
 def extract_base_key(assignment_key: str) -> str:
     """분반 키(``과목명-분반+N``)에서 기본 과목 키를 추출.
 

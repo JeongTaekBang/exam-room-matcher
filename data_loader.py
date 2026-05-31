@@ -98,6 +98,7 @@ class ExamRequest:
     exam_end: Optional[int]
     room_choice: Optional[str]
     remarks: str
+    processed_room: str = ""
     key: str = ""
     category: Category = Category.SKIP
     skip_reason: str = ""
@@ -241,6 +242,7 @@ def load_requests(filepath: str) -> list:
             exam_end=_parse_int(r(13)),
             room_choice=str(r(14)).strip() if r(14) else None,
             remarks=remarks,
+            processed_room=str(r(16) or "").strip(),
         )
         requests.append(req)
 
@@ -260,6 +262,53 @@ def load_requests(filepath: str) -> list:
 
     wb.close()
     return requests
+
+
+def normalize_ban(ban) -> str:
+    """분반 비교용 정규화 — 숫자 분반의 앞 0을 제거('01'→'1'). 영숫자('A0')는 원형 유지.
+
+    시간표 점유자 텍스트('과목명-01')와 요청 시트 분반('1' 또는 '01')의 표기
+    차이를 흡수한다.
+    """
+    b = str(ban or "").strip()
+    if b.isdigit():
+        return b.lstrip("0") or "0"
+    return b
+
+
+def load_course_exam_index(filepath: str) -> dict:
+    """요청 엑셀의 모든 시트(공통+전공)에서 (교과목명, 분반)별 시험 메타를 모은다.
+
+    ② 시간표 겹침 검사에서 "시간표 점유자가 그 시험주간에 실제로 그 방에서
+    시험을 보는가"를 판정하는 데 쓴다. 정상 수업 시간표는 시험주간 점유의
+    근거가 아니므로(시험만 점유), 점유자의 시험 일자/교시/미실시 여부로 검증한다.
+
+    Returns:
+        ``{(교과목명, 정규화분반): {exam_date, exam_start, exam_end, no_exam}}``
+        — 공통이 두 시트에 중복되면 첫 등장만 유지.
+    """
+    wb = openpyxl.load_workbook(filepath, data_only=True)
+    index: dict = {}
+    for sn in wb.sheetnames:
+        ws = wb[sn]
+        if str(ws.cell(row=1, column=5).value or "") != "교과목명":
+            continue  # 요청 시트가 아닌 시트 건너뜀
+        for row_num in range(2, ws.max_row + 1):
+            r = lambda c: ws.cell(row=row_num, column=c).value
+            name = str(r(5) or "").strip()
+            if not name:
+                continue
+            key = (name, normalize_ban(r(6)))
+            if key in index:
+                continue
+            index[key] = {
+                "exam_date": _parse_date(r(11)),
+                "exam_start": _parse_int(r(12)),
+                "exam_end": _parse_int(r(13)),
+                "no_exam": _has_no_exam_keyword(str(r(15) or "")),
+            }
+    wb.close()
+    return index
 
 
 def classify_requests(requests: list, date_to_day: dict = None) -> list:
@@ -387,6 +436,7 @@ def load_timetable(filepath: str) -> tuple:
 def load_all(request_file: str, timetable_file: str) -> dict:
     """엑셀 2개를 읽어 전체 데이터를 반환."""
     requests = load_requests(request_file)
+    course_exam_index = load_course_exam_index(request_file)
     room_to_row, room_capacity, timetable_data = load_timetable(timetable_file)
 
     # 시트 이름에서 날짜 매핑을 동적 생성 (파싱 실패 시 하드코딩 폴백)
@@ -406,6 +456,7 @@ def load_all(request_file: str, timetable_file: str) -> dict:
 
     return {
         "requests": requests,
+        "course_exam_index": course_exam_index,
         "room_to_row": room_to_row,
         "room_capacity": room_capacity,
         "timetable_data": timetable_data,

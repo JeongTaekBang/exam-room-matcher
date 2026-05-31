@@ -281,5 +281,75 @@ class TestInferYear:
         assert _infer_year([req]) is None
 
 
+class TestLoadProcessedRoom:
+    def test_reads_col16(self, tmp_path):
+        """load_requests가 16번째 열(요청사항 처리)을 processed_room으로 읽는다."""
+        import openpyxl
+        from data_loader import load_requests
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        headers = ["변경요청", "순번", "소속", "과목구분", "교과목명", "분반",
+                   "담당교수", "수강생수", "수업시간표", "강의실", "시험일자",
+                   "시작교시", "종료교시", "강의실선택", "요청사항", "요청사항 처리"]
+        ws.append(headers)  # 로더는 2행부터 읽음
+        ws.append([0, 1, "학부", "공통", "사이버윤리", "03", "교수", 78,
+                   "수2~3(M213)", "M213", "2026-06-17", 6, 7, None,
+                   "과제대체", "N212"])
+        path = tmp_path / "req.xlsx"
+        wb.save(path)
+
+        reqs = load_requests(str(path))
+        assert len(reqs) == 1
+        assert reqs[0].processed_room == "N212"
+        assert reqs[0].name == "사이버윤리"
+
+    def test_processed_room_defaults_empty(self):
+        req = _make_req()
+        assert req.processed_room == ""
+
+
+class TestNormalizeBan:
+    def test_strip_leading_zero(self):
+        from data_loader import normalize_ban
+        assert normalize_ban("01") == "1"
+        assert normalize_ban("1") == "1"
+        assert normalize_ban("10") == "10"
+        assert normalize_ban("0") == "0"
+        assert normalize_ban(1) == "1"
+
+    def test_alnum_and_empty(self):
+        from data_loader import normalize_ban
+        assert normalize_ban("A0") == "A0"
+        assert normalize_ban(None) == ""
+        assert normalize_ban("  02 ") == "2"
+
+
+class TestLoadCourseExamIndex:
+    def test_reads_all_sheets(self, tmp_path):
+        import openpyxl
+        from data_loader import load_course_exam_index
+        hdr = ["", "", "", "과목구분", "교과목명", "분반", "", "", "", "",
+               "시험일자", "시작교시", "종료교시", "", "요청사항", ""]
+        wb = openpyxl.Workbook()
+        ws1 = wb.active
+        ws1.title = "전공개설과목신청리스트 (공통)"
+        ws1.append(hdr)
+        ws1.append([None, None, None, "공통", "법학개론", "01", None, None, None,
+                    None, "2026-06-16", 4, 5, None, "비고", None])
+        ws2 = wb.create_sheet("전공개설과목신청리스트")
+        ws2.append(hdr)
+        ws2.append([None, None, None, "전공", "한국어어휘론", "01", None, None, None,
+                    None, "2026-06-09", 2, 2, None, "시험주간 강의실 사용 안함", None])
+        path = tmp_path / "req.xlsx"
+        wb.save(path)
+
+        idx = load_course_exam_index(str(path))
+        assert idx[("법학개론", "1")]["exam_date"] == datetime.date(2026, 6, 16)
+        assert idx[("법학개론", "1")]["exam_start"] == 4
+        assert idx[("법학개론", "1")]["no_exam"] is False
+        assert idx[("한국어어휘론", "1")]["exam_date"] == datetime.date(2026, 6, 9)
+        assert idx[("한국어어휘론", "1")]["no_exam"] is True
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
