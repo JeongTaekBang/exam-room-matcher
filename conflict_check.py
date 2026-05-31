@@ -16,7 +16,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from typing import Optional
 
-from data_loader import ExamRequest, normalize_ban
+from data_loader import Category, ExamRequest, normalize_ban
 
 # ``요청사항 처리`` 값 중 실제 강의실이 아닌 마커(공백 제거 후 비교).
 # 체육관/테니스장/헬스장 등은 실제 시험 장소이므로 제외 대상이 아니다.
@@ -45,6 +45,29 @@ def parse_processed_rooms(text: str) -> list[str]:
             continue
         rooms.append(room)
     return rooms
+
+
+def detect_manual_processed_entries(requests, assignments):
+    """배정 워크플로를 거치지 않고 P열(요청사항 처리)에 직접 강의실을 적은 요청.
+
+    조건: (1) 분류 ∈ {ROOM_CHANGE, ROOM_SPLIT, SKIP} (프로그램이 사람에게 맡기는 분류),
+    (2) 프로그램 배정 키가 전혀 없음(분반 +N 포함), (3) P열에 실제 강의실 ≥1.
+    NORMAL_EXAM/NO_EXAM(분류 자동완료)은 제외된다. 프로그램 배정과 disjoint하므로
+    완료 집계에 중복 없이 합산 가능. 읽기 전용 — assignments를 변경하지 않는다.
+
+    Returns:
+        ``[(req, rooms: list[str]), ...]`` — 입력 순서 보존.
+    """
+    result = []
+    for req in requests:
+        if req.category not in (Category.ROOM_CHANGE, Category.ROOM_SPLIT, Category.SKIP):
+            continue
+        if any(k == req.key or k.startswith(req.key + "+") for k in (assignments or {})):
+            continue
+        rooms = parse_processed_rooms(req.processed_room)
+        if rooms:
+            result.append((req, rooms))
+    return result
 
 
 @dataclass

@@ -2,9 +2,10 @@
 
 import datetime
 
-from data_loader import ExamRequest, ScheduleSlot, normalize_ban
+from data_loader import Category, ExamRequest, ScheduleSlot, normalize_ban
 from conflict_check import (
     parse_processed_rooms,
+    detect_manual_processed_entries,
     detect_processed_room_conflicts,
     detect_timetable_overlaps,
     _occupant_base,
@@ -352,3 +353,62 @@ class TestTimetableOverlapsOccupantIndex:
         # occupant_index 없으면 시간표 점유를 그대로 신뢰(플래그)
         ov = detect_timetable_overlaps([self._req()], self._tt(), DTS, DTD)
         assert len(ov) == 1
+
+
+class TestManualProcessedEntries:
+    """배정 워크플로 미경유 + P열 직접 입력 탐지."""
+
+    def _req(self, name="가과목", ban="01", processed_room="N212",
+             category=Category.ROOM_CHANGE):
+        r = _make_req(name=name, ban=ban, processed_room=processed_room)
+        r.category = category
+        return r
+
+    def test_room_change_no_assignment_detected(self):
+        req = self._req(category=Category.ROOM_CHANGE)
+        result = detect_manual_processed_entries([req], {})
+        assert len(result) == 1
+        assert result[0][0] is req
+        assert result[0][1] == ["N212"]
+
+    def test_skip_with_processed_room_detected(self):
+        req = self._req(category=Category.SKIP, processed_room="N305")
+        result = detect_manual_processed_entries([req], {})
+        assert [rooms for _, rooms in result] == [["N305"]]
+
+    def test_room_split_multi_room(self):
+        req = self._req(category=Category.ROOM_SPLIT, processed_room="N210, N405")
+        result = detect_manual_processed_entries([req], {})
+        assert result[0][1] == ["N210", "N405"]
+
+    def test_program_assignment_excluded(self):
+        # 정확 키 배정이 있으면 프로그램 추적 건 → 제외
+        req = self._req(category=Category.ROOM_CHANGE)  # key = "가과목-01"
+        result = detect_manual_processed_entries([req], {"가과목-01": {"room": "N999"}})
+        assert result == []
+
+    def test_split_assignment_key_excluded(self):
+        # 분반 다중 배정 키(+N)도 '배정 있음'으로 간주 → 제외
+        req = self._req(category=Category.ROOM_SPLIT)  # key = "가과목-01"
+        result = detect_manual_processed_entries([req], {"가과목-01+1": {"room": "N999"}})
+        assert result == []
+
+    def test_normal_exam_excluded(self):
+        req = self._req(category=Category.NORMAL_EXAM)
+        assert detect_manual_processed_entries([req], {}) == []
+
+    def test_no_exam_excluded(self):
+        req = self._req(category=Category.NO_EXAM)
+        assert detect_manual_processed_entries([req], {}) == []
+
+    def test_marker_and_blank_processed_room_excluded(self):
+        for pr in ["강의실 미사용", "확인필요", "", None]:
+            req = self._req(category=Category.ROOM_CHANGE, processed_room=pr)
+            assert detect_manual_processed_entries([req], {}) == []
+
+    def test_order_preserved_and_filtered(self):
+        a = self._req(name="에이", processed_room="A1", category=Category.ROOM_CHANGE)
+        b = self._req(name="비", processed_room="B1", category=Category.SKIP)
+        c = self._req(name="씨", processed_room="강의실 미사용", category=Category.ROOM_SPLIT)
+        result = detect_manual_processed_entries([a, b, c], {})
+        assert [req.name for req, _ in result] == ["에이", "비"]
