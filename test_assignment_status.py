@@ -15,6 +15,7 @@ from assignment_status import (
     _room_cap,
     compute_auto_released,
     compute_status,
+    compute_unused_rooms,
     extract_base_key,
     resolve_processed_room,
 )
@@ -478,3 +479,67 @@ class TestResolveProcessedRoom:
         req = _make_req(name="가", ban="01", room="K106")
         req.category = Category.NORMAL_EXAM
         assert resolve_processed_room(req, {"가-01": {"room": "N999"}}) == "N999"
+
+
+# ──────────────────────────────────────────────
+# 시험주간 통산 미사용 강의실 (compute_unused_rooms)
+# ──────────────────────────────────────────────
+
+class TestUnusedRooms:
+    # timetable_data: {sheet: {room: {period: (value, rgb)}}}
+    # A101=항상 점유, A102=한 시트만 점유, EMPTY=전 시트 0점유
+    def _ttd(self):
+        return {
+            "4.21.(화)": {
+                "A101": {0: ("수업", None)},
+                "A102": {1: ("수업", None)},
+                "EMPTY": {},
+            },
+            "4.22.(수)": {
+                "A101": {2: ("수업", None)},
+                "A102": {},
+                "EMPTY": {},
+            },
+        }
+
+    _CAP = {"A101": 50, "A102": 30, "EMPTY": 40}
+    _ORDER = ["4.21.(화)", "4.22.(수)"]
+
+    def test_only_zero_occupancy_room_returned(self):
+        result = compute_unused_rooms(self._ttd(), self._CAP, {}, self._ORDER)
+        assert result == [("EMPTY", 40)]
+
+    def test_single_sheet_occupancy_excludes_room(self):
+        # A102는 화요일에만 점유 → 통산 점유>0 → 미사용 아님
+        rooms = [r for r, _ in compute_unused_rooms(self._ttd(), self._CAP, {}, self._ORDER)]
+        assert "A102" not in rooms
+
+    def test_assigned_room_excluded_even_if_unoccupied(self):
+        assignments = {"과목-01": {"room": "EMPTY"}}
+        result = compute_unused_rooms(self._ttd(), self._CAP, assignments, self._ORDER)
+        assert result == []
+
+    def test_memo_sheet_not_in_order_is_ignored(self):
+        ttd = self._ttd()
+        # sheet_order에 없는 메모 시트 — 모집단/점유 판정에서 제외되어야 함
+        ttd["대형강의실 요청"] = {"MEMO룸": {0: ("메모", None)}}
+        rooms = [r for r, _ in compute_unused_rooms(ttd, self._CAP, {}, self._ORDER)]
+        assert "MEMO룸" not in rooms
+        assert rooms == ["EMPTY"]
+
+    def test_sorted_by_capacity_desc(self):
+        ttd = {
+            "S1": {"BIG": {}, "SMALL": {}, "MID": {}},
+        }
+        cap = {"BIG": 100, "SMALL": 10, "MID": 50}
+        result = compute_unused_rooms(ttd, cap, {}, ["S1"])
+        assert [r for r, _ in result] == ["BIG", "MID", "SMALL"]
+
+    def test_empty_inputs_return_empty_list(self):
+        assert compute_unused_rooms({}, {}, {}, []) == []
+        assert compute_unused_rooms(self._ttd(), self._CAP, {}, []) == []
+
+    def test_missing_capacity_reported_as_zero(self):
+        ttd = {"S1": {"NOCAP": {}}}
+        result = compute_unused_rooms(ttd, {}, {}, ["S1"])
+        assert result == [("NOCAP", 0)]

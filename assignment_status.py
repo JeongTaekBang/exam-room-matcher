@@ -176,6 +176,38 @@ def _room_cap(room_capacity: dict | None, room: str) -> int:
         return 0
 
 
+def compute_unused_rooms(timetable_data, room_capacity, assignments, sheet_order):
+    """시험주간 통산 한 번도 안 쓰인 강의실 목록.
+
+    '미사용' = sheet_order의 모든 날짜·교시에서 기존 수업 점유가 없고
+    우리 배정도 없는 강의실. 날짜 매칭된 시트(sheet_order)만 모집단으로 삼아
+    '대형강의실 요청' 같은 메모 시트는 자연히 제외되고, 시트마다 명부가 달라도
+    전 시트 합집합으로 모집단을 잡는다. 점유 0 기준이므로 해제(released_slots)는
+    무관하다 — 해제는 원래 점유가 있던 방에만 발생하기 때문이다.
+
+    Returns:
+        ``[(room, capacity), ...]`` — 수용인원 큰 순 정렬.
+    """
+    assigned_rooms = {
+        str(a.get("room", "")).strip()
+        for a in (assignments or {}).values()
+        if str(a.get("room", "")).strip()
+    }
+    all_rooms = set()
+    for sn in sheet_order:
+        all_rooms |= set(timetable_data.get(sn, {}).keys())
+
+    unused = []
+    for room in all_rooms:
+        if room in assigned_rooms:
+            continue
+        occ = sum(len(timetable_data.get(sn, {}).get(room, {})) for sn in sheet_order)
+        if occ == 0:
+            unused.append((room, _room_cap(room_capacity, room)))
+    unused.sort(key=lambda x: x[1], reverse=True)
+    return unused
+
+
 # ──────────────────────────────────────────────
 # 상태 판정
 # ──────────────────────────────────────────────

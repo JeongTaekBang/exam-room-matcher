@@ -83,6 +83,7 @@ from assignment_status import (
     _room_cap,
     compute_auto_released,
     compute_status,
+    compute_unused_rooms,
     extract_base_key,
     resolve_processed_room,
 )
@@ -1824,6 +1825,22 @@ with tab5:
         pct = round(filled / total * 100, 1) if total else 0
         util_rows.append({"일자": sn, "점유율(%)": pct, "사용": filled, "해제": released_count, "전체": total})
     st.dataframe(pd.DataFrame(util_rows), **_STRETCH, hide_index=True)
+
+    st.markdown("**시험주간 통산 미사용 강의실 (전 기간 수업·배정 0건)**")
+    _unused = compute_unused_rooms(
+        timetable_data, room_capacity, st.session_state.assignments, SHEET_ORDER
+    )
+    if _unused:
+        df_unused = pd.DataFrame(
+            [{"강의실": r, "수용인원": (c or "-")} for r, c in _unused]
+        )
+        st.dataframe(df_unused, **_STRETCH, hide_index=True, height=300)
+        st.caption(
+            f"총 {len(_unused)}개 — 시험 기간 내내 기존 수업·배정이 0건인 강의실. "
+            "여유 공급(추가 배정 가능)으로 활용할 수 있다. 수용인원 '-'는 엑셀에 인원 미기재."
+        )
+    else:
+        st.info("시험주간 내내 비어 있는 강의실이 없습니다.")
 
     st.markdown("---")
     m1, m2, m3, m4, m5 = st.columns(5)
