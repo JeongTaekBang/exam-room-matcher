@@ -837,6 +837,34 @@ def _pcol_caption(room, no_use, classified):
         seg.append(f"수동 미사용 {no_use}")
     seg.append(f"분류 {classified}")
     return " · ".join(seg)
+
+
+def _render_skip_pending():
+    """미확정 내역 expander — 분류 막힘(엑셀 정정 필요) 건. 미배정 목록 바로 아래에 렌더.
+
+    미배정 if/elif/else 모든 분기에서 호출 — 미배정이 0건이어도 항상 보이게.
+    """
+    _skip_pending = [r for r in requests
+                     if compute_status(r, st.session_state.assignments, room_capacity) == "미확정"
+                     and r.key not in _manual_keys]
+    with st.expander(f"미확정 내역 ({len(_skip_pending)}건)"):
+        st.caption(
+            "분류 단계에서 정보가 부족해 시험 진행/미실시를 판단 못 한 건 — 사유대로 요청 엑셀의 "
+            "K열(시험일자)·O열(미실시 키워드)·I열(수업시간표 강의실)을 정정하고 사이드바 "
+            "'엑셀 데이터 다시 불러오기'를 누르면 재분류됩니다. (P열에 강의실/미사용을 직접 적은 "
+            "건은 아래 'P열 직접 입력 내역'에 별도 표시)"
+        )
+        if _skip_pending:
+            _sk_rows = [{
+                "과목명": r.key,
+                "교수": r.professor,
+                "학생수": r.students,
+                "P열": r.processed_room or "",
+                "사유": r.skip_reason or "확인 필요",
+            } for r in _skip_pending]
+            st.dataframe(pd.DataFrame(_sk_rows), **_STRETCH, hide_index=True, height=300)
+        else:
+            st.info("미확정 항목이 없습니다.")
 _review_rows = build_review_queue_rows(
     requests, timetable_data, room_capacity, st.session_state.assignments,
     all_released_slots,
@@ -1075,6 +1103,7 @@ with tab2:
                 "요청사항": req.remarks,
             })
         st.dataframe(pd.DataFrame(target_rows), **_STRETCH, hide_index=True, height=200)
+        _render_skip_pending()
 
         # 배정 패널
         options = [f"{r.key} | {r.students}명 | {CAT_LABELS[r.category]}"
@@ -1425,8 +1454,10 @@ with tab2:
                 st.warning("시험일자 정보가 없어 자동 검색이 불가합니다.")
     elif target_reqs:
         st.info("필터 조건에 맞는 미배정 항목 없음")
+        _render_skip_pending()
     else:
         st.success("모든 과목 배정 완료!")
+        _render_skip_pending()
 
     # ── 배정 작업 현황 (분류별 + 개별 취소) ──
     with st.expander("배정 작업 현황", expanded=bool(st.session_state.assignments)):
