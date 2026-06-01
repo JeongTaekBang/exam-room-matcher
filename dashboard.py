@@ -39,6 +39,7 @@ from workflow_utils import (
     save_releases,
 )
 from conflict_check import (
+    detect_manual_no_use_entries,
     detect_manual_processed_entries,
     detect_processed_room_conflicts,
     detect_timetable_overlaps,
@@ -787,6 +788,7 @@ _n_auto_done = sum(
 )
 _n_manual_done = _n_done - _n_auto_done
 # P열 직접 입력(배정 워크플로 미경유 수동 처리) — 프로그램 완료와 disjoint
+# 두 종류: 실제 강의실 배정(_manual_entries) / '강의실 미사용' 면제(_no_use_entries)
 _manual_entries = detect_manual_processed_entries(requests, st.session_state.assignments)
 _n_manual_p = len(_manual_entries)
 _n_manual_p_todo = sum(
@@ -794,7 +796,41 @@ _n_manual_p_todo = sum(
     if req.category in (Category.ROOM_CHANGE, Category.ROOM_SPLIT)
 )
 _n_manual_p_skip = _n_manual_p - _n_manual_p_todo
-_n_effective_done = _n_done + _n_manual_p
+_no_use_entries = detect_manual_no_use_entries(requests, st.session_state.assignments)
+_n_no_use = len(_no_use_entries)
+_n_no_use_todo = sum(
+    1 for req in _no_use_entries
+    if req.category in (Category.ROOM_CHANGE, Category.ROOM_SPLIT)
+)
+_n_no_use_skip = _n_no_use - _n_no_use_todo
+_n_effective_done = _n_done + _n_manual_p + _n_no_use
+# 잔여(진짜 미처리) = 빈칸·확인필요 등
+_n_rest_todo = _n_todo - _n_manual_p_todo - _n_no_use_todo
+_n_rest_skip = _n_skip - _n_manual_p_skip - _n_no_use_skip
+
+
+def _progress_text(pct):
+    """진행 바 텍스트 — 0이 아닌 처리 구성요소만 조립."""
+    parts = [f"프로그램 {_n_done}"]
+    if _n_manual_p:
+        parts.append(f"P열배정 {_n_manual_p}")
+    if _n_no_use:
+        parts.append(f"P열미사용 {_n_no_use}")
+    if len(parts) > 1:
+        return (f"진행률 {int(pct * 100)}% — 처리 {_n_effective_done} "
+                f"({' + '.join(parts)}) / 전체 {len(requests)}")
+    return f"진행률 {int(pct * 100)}% — 완료 {_n_done} / 전체 {len(requests)}"
+
+
+def _pcol_caption(room, no_use, rest):
+    """미배정/미확정 metric 하단 캡션 — P열 처리 분해."""
+    seg = []
+    if room:
+        seg.append(f"P열 강의실 {room}")
+    if no_use:
+        seg.append(f"P열 미사용 {no_use}")
+    seg.append(f"미처리 {rest}")
+    return " · ".join(seg)
 _review_rows = build_review_queue_rows(
     requests, timetable_data, room_capacity, st.session_state.assignments,
     all_released_slots,
@@ -835,20 +871,14 @@ with tab2:
 
     # ── 진행 상황 요약 ──
     _pct = _n_effective_done / len(requests) if requests else 0.0
-    if _n_manual_p:
-        _ptext = (f"진행률 {int(_pct * 100)}% — 처리 {_n_effective_done} "
-                  f"(프로그램 {_n_done} + P열수동 {_n_manual_p}) / 전체 {len(requests)}")
-    else:
-        _ptext = f"진행률 {int(_pct * 100)}% — 완료 {_n_done} / 전체 {len(requests)}"
-    st.progress(_pct, text=_ptext)
+    st.progress(_pct, text=_progress_text(_pct))
     _m1, _m2, _m3, _m4, _m5 = st.columns(5)
     with _m1:
         st.metric("완료", f"{_n_done}건", help=_done_help)
         st.caption(f"자동 {_n_auto_done} / 수동 {_n_manual_done}")
     with _m2:
         st.metric("미배정", f"{_n_todo}건")
-        if _n_manual_p_todo:
-            st.caption(f"P열 직접 처리 {_n_manual_p_todo}")
+        st.caption(_pcol_caption(_n_manual_p_todo, _n_no_use_todo, _n_rest_todo))
     with _m3:
         st.metric(
             "미확정", f"{_n_skip}건",
@@ -856,8 +886,7 @@ with tab2:
                  "탭3 검수 큐의 '세부' 컬럼에서 사유를 확인하고 "
                  "요청 엑셀을 정정한 뒤 사이드바의 '엑셀 데이터 다시 불러오기'를 누르면 재분류됩니다.",
         )
-        if _n_manual_p_skip:
-            st.caption(f"P열 직접 처리 {_n_manual_p_skip}")
+        st.caption(_pcol_caption(_n_manual_p_skip, _n_no_use_skip, _n_rest_skip))
     _m4.metric("검수 큐", f"{len(_review_rows)}건")
     _m5.metric("전체", f"{len(requests)}건")
 
@@ -1429,23 +1458,30 @@ with tab2:
             st.info("배정 내역이 없습니다.")
 
     # ── P열 직접 입력 내역 (배정 워크플로 미경유 수동 처리, 읽기 전용) ──
-    with st.expander(f"P열 직접 입력 내역 ({_n_manual_p}건)"):
+    with st.expander(f"P열 직접 입력 내역 ({_n_manual_p + _n_no_use}건)"):
         st.caption(
-            "배정 작업을 거치지 않고 요청 엑셀 P열(요청사항 처리)에 직접 강의실을 적은 건 — "
-            "원본 엑셀 값이라 읽기 전용입니다. 프로그램 배정과 합쳐 실질 결과물이 됩니다."
+            "배정 작업을 거치지 않고 요청 엑셀 P열(요청사항 처리)에 직접 처리한 건 — "
+            "원본 엑셀 값이라 읽기 전용입니다. '강의실 배정'과 '미사용'(강의실 면제)을 구분해 "
+            "표시하며, 프로그램 배정과 합쳐 실질 결과물이 됩니다."
         )
-        if _manual_entries:
+        _all_manual = (
+            [(req, ", ".join(rooms), "강의실 배정") for req, rooms in _manual_entries]
+            + [(req, "강의실 미사용", "미사용") for req in _no_use_entries]
+        )
+        _all_manual.sort(key=lambda x: x[0].row)
+        if _all_manual:
             _mp_rows = [{
                 "과목명": req.name,
                 "분반": req.ban,
                 "학생수": req.students,
                 "분류": CAT_LABELS[req.category],
-                "P열 강의실": ", ".join(rooms),
+                "처리": done,
+                "유형": kind,
                 "시험일": str(req.exam_date) if req.exam_date else "",
-            } for req, rooms in _manual_entries]
+            } for req, done, kind in _all_manual]
             st.dataframe(pd.DataFrame(_mp_rows), **_STRETCH, hide_index=True, height=260)
         else:
-            st.info("P열에 직접 입력된 건이 없습니다.")
+            st.info("P열에 직접 처리된 건이 없습니다.")
 
 
 # ── 탭 3: 배정 현황 ──
@@ -1454,20 +1490,14 @@ with tab3:
 
     # ── 진행 상황 요약 ──
     _pct = _n_effective_done / len(requests) if requests else 0.0
-    if _n_manual_p:
-        _ptext = (f"진행률 {int(_pct * 100)}% — 처리 {_n_effective_done} "
-                  f"(프로그램 {_n_done} + P열수동 {_n_manual_p}) / 전체 {len(requests)}")
-    else:
-        _ptext = f"진행률 {int(_pct * 100)}% — 완료 {_n_done} / 전체 {len(requests)}"
-    st.progress(_pct, text=_ptext)
+    st.progress(_pct, text=_progress_text(_pct))
     _s1, _s2, _s3, _s4, _s5 = st.columns(5)
     with _s1:
         st.metric("완료", f"{_n_done}건", help=_done_help)
         st.caption(f"자동 {_n_auto_done} / 수동 {_n_manual_done}")
     with _s2:
         st.metric("미배정", f"{_n_todo}건")
-        if _n_manual_p_todo:
-            st.caption(f"P열 직접 처리 {_n_manual_p_todo}")
+        st.caption(_pcol_caption(_n_manual_p_todo, _n_no_use_todo, _n_rest_todo))
     with _s3:
         st.metric(
             "미확정", f"{_n_skip}건",
@@ -1475,8 +1505,7 @@ with tab3:
                  "아래 검수 큐의 '세부' 컬럼에서 사유를 확인하고 "
                  "요청 엑셀을 정정한 뒤 사이드바의 '엑셀 데이터 다시 불러오기'를 누르면 재분류됩니다.",
         )
-        if _n_manual_p_skip:
-            st.caption(f"P열 직접 처리 {_n_manual_p_skip}")
+        st.caption(_pcol_caption(_n_manual_p_skip, _n_no_use_skip, _n_rest_skip))
     _s4.metric("검수 큐", f"{len(_review_rows)}건")
     _s5.metric("전체", f"{len(requests)}건")
 

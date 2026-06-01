@@ -47,27 +47,56 @@ def parse_processed_rooms(text: str) -> list[str]:
     return rooms
 
 
+# ``요청사항 처리``를 '강의실 미사용'으로 적은 표기의 정규화형(_strip_ws 적용).
+NO_USE_MARKER = "강의실미사용"
+
+
+def _is_manual_candidate(req, assignments) -> bool:
+    """배정 워크플로 미경유(프로그램 배정 키 없음) + 사람이 맡는 분류인지.
+
+    분류 ∈ {ROOM_CHANGE, ROOM_SPLIT, SKIP}이고 프로그램 배정 키(분반 +N 포함)가
+    전혀 없는 요청만 P열 수동 처리 후보로 본다. NORMAL_EXAM/NO_EXAM(분류 자동완료)은
+    제외 → 프로그램 완료와 disjoint.
+    """
+    if req.category not in (Category.ROOM_CHANGE, Category.ROOM_SPLIT, Category.SKIP):
+        return False
+    return not any(k == req.key or k.startswith(req.key + "+") for k in (assignments or {}))
+
+
 def detect_manual_processed_entries(requests, assignments):
     """배정 워크플로를 거치지 않고 P열(요청사항 처리)에 직접 강의실을 적은 요청.
 
-    조건: (1) 분류 ∈ {ROOM_CHANGE, ROOM_SPLIT, SKIP} (프로그램이 사람에게 맡기는 분류),
-    (2) 프로그램 배정 키가 전혀 없음(분반 +N 포함), (3) P열에 실제 강의실 ≥1.
-    NORMAL_EXAM/NO_EXAM(분류 자동완료)은 제외된다. 프로그램 배정과 disjoint하므로
-    완료 집계에 중복 없이 합산 가능. 읽기 전용 — assignments를 변경하지 않는다.
+    조건: (1) `_is_manual_candidate`(사람이 맡는 분류 + 프로그램 배정 없음),
+    (2) P열에 실제 강의실 ≥1. 프로그램 배정과 disjoint하므로 완료 집계에 중복 없이
+    합산 가능. 읽기 전용 — assignments를 변경하지 않는다.
 
     Returns:
         ``[(req, rooms: list[str]), ...]`` — 입력 순서 보존.
     """
     result = []
     for req in requests:
-        if req.category not in (Category.ROOM_CHANGE, Category.ROOM_SPLIT, Category.SKIP):
-            continue
-        if any(k == req.key or k.startswith(req.key + "+") for k in (assignments or {})):
+        if not _is_manual_candidate(req, assignments):
             continue
         rooms = parse_processed_rooms(req.processed_room)
         if rooms:
             result.append((req, rooms))
     return result
+
+
+def detect_manual_no_use_entries(requests, assignments):
+    """배정 워크플로 미경유 + P열을 '강의실 미사용'으로 처리한 요청(강의실 면제).
+
+    강의실을 배정한 게 아니라 '이 시험은 강의실을 안 쓴다'를 사람이 P열에 표시한 건
+    (미실시·대체과제·온라인 등). 실질 처리에는 포함되지만 '배정'과 성격이 다르다.
+    `detect_manual_processed_entries`(실제 강의실)와 disjoint하며, 둘 다 프로그램
+    완료와도 disjoint. '확인필요'·빈칸은 미해결/미착수이므로 제외된다.
+
+    Returns:
+        ``[req, ...]`` — 입력 순서 보존.
+    """
+    return [req for req in requests
+            if _is_manual_candidate(req, assignments)
+            and _strip_ws(req.processed_room) == NO_USE_MARKER]
 
 
 @dataclass

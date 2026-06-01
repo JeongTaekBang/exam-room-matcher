@@ -6,6 +6,7 @@ from data_loader import Category, ExamRequest, ScheduleSlot, normalize_ban
 from conflict_check import (
     parse_processed_rooms,
     detect_manual_processed_entries,
+    detect_manual_no_use_entries,
     detect_processed_room_conflicts,
     detect_timetable_overlaps,
     _occupant_base,
@@ -412,3 +413,53 @@ class TestManualProcessedEntries:
         c = self._req(name="씨", processed_room="강의실 미사용", category=Category.ROOM_SPLIT)
         result = detect_manual_processed_entries([a, b, c], {})
         assert [req.name for req, _ in result] == ["에이", "비"]
+
+
+class TestManualNoUseEntries:
+    """배정 워크플로 미경유 + P열 '강의실 미사용'(강의실 면제) 탐지."""
+
+    def _req(self, name="가과목", ban="01", processed_room="강의실 미사용",
+             category=Category.SKIP):
+        r = _make_req(name=name, ban=ban, processed_room=processed_room)
+        r.category = category
+        return r
+
+    def test_skip_no_use_detected(self):
+        req = self._req(category=Category.SKIP)
+        assert detect_manual_no_use_entries([req], {}) == [req]
+
+    def test_whitespace_variants_detected(self):
+        for pr in ["강의실 미사용", "강의실미사용", "  강의실  미사용 "]:
+            req = self._req(processed_room=pr)
+            assert detect_manual_no_use_entries([req], {}) == [req]
+
+    def test_real_room_not_detected(self):
+        # 실제 강의실은 '미사용'이 아님 → 다른 함수 소관
+        req = self._req(processed_room="N212")
+        assert detect_manual_no_use_entries([req], {}) == []
+
+    def test_check_needed_and_blank_not_detected(self):
+        for pr in ["확인필요", "", None]:
+            req = self._req(processed_room=pr)
+            assert detect_manual_no_use_entries([req], {}) == []
+
+    def test_program_assignment_excluded(self):
+        req = self._req(category=Category.ROOM_CHANGE)  # key = "가과목-01"
+        assert detect_manual_no_use_entries([req], {"가과목-01": {"room": "N9"}}) == []
+        assert detect_manual_no_use_entries([req], {"가과목-01+1": {"room": "N9"}}) == []
+
+    def test_auto_categories_excluded(self):
+        for cat in (Category.NORMAL_EXAM, Category.NO_EXAM):
+            req = self._req(category=cat)
+            assert detect_manual_no_use_entries([req], {}) == []
+
+    def test_disjoint_from_processed_rooms(self):
+        # 같은 입력에서 두 함수가 같은 req를 동시에 잡지 않는다
+        room = self._req(name="방", processed_room="N100", category=Category.ROOM_CHANGE)
+        nouse = self._req(name="면제", processed_room="강의실 미사용", category=Category.SKIP)
+        reqs = [room, nouse]
+        r_ids = {id(req) for req, _ in detect_manual_processed_entries(reqs, {})}
+        u_ids = {id(req) for req in detect_manual_no_use_entries(reqs, {})}
+        assert r_ids == {id(room)}
+        assert u_ids == {id(nouse)}
+        assert r_ids & u_ids == set()
