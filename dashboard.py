@@ -807,29 +807,35 @@ _n_effective_done = _n_done + _n_manual_p + _n_no_use
 # 잔여(진짜 미처리) = 빈칸·확인필요 등
 _n_rest_todo = _n_todo - _n_manual_p_todo - _n_no_use_todo
 _n_rest_skip = _n_skip - _n_manual_p_skip - _n_no_use_skip
+# P열로 수동 처리된 요청 키 — 작업목록에서 제외(헤드라인=실제 미처리와 정합)
+_manual_keys = ({req.key for req, _ in _manual_entries}
+                | {req.key for req in _no_use_entries})
 
 
 def _progress_text(pct):
-    """진행 바 텍스트 — 0이 아닌 처리 구성요소만 조립."""
+    """진행 바 텍스트 — 0이 아닌 처리 구성요소만 조립.
+
+    '수동 배정'/'수동 미사용'은 배정 워크플로를 거치지 않고 P열에 직접 처리한 건.
+    """
     parts = [f"프로그램 {_n_done}"]
     if _n_manual_p:
-        parts.append(f"P열배정 {_n_manual_p}")
+        parts.append(f"수동 배정 {_n_manual_p}")
     if _n_no_use:
-        parts.append(f"P열미사용 {_n_no_use}")
+        parts.append(f"수동 미사용 {_n_no_use}")
     if len(parts) > 1:
         return (f"진행률 {int(pct * 100)}% — 처리 {_n_effective_done} "
                 f"({' + '.join(parts)}) / 전체 {len(requests)}")
     return f"진행률 {int(pct * 100)}% — 완료 {_n_done} / 전체 {len(requests)}"
 
 
-def _pcol_caption(room, no_use, rest):
-    """미배정/미확정 metric 하단 캡션 — P열 처리 분해."""
+def _pcol_caption(room, no_use, classified):
+    """미배정/미확정 metric(=실제 미처리) 하단 캡션 — 수동 처리분 + 분류 총계."""
     seg = []
     if room:
-        seg.append(f"P열 강의실 {room}")
+        seg.append(f"수동 배정 {room}")
     if no_use:
-        seg.append(f"P열 미사용 {no_use}")
-    seg.append(f"미처리 {rest}")
+        seg.append(f"수동 미사용 {no_use}")
+    seg.append(f"분류 {classified}")
     return " · ".join(seg)
 _review_rows = build_review_queue_rows(
     requests, timetable_data, room_capacity, st.session_state.assignments,
@@ -877,16 +883,17 @@ with tab2:
         st.metric("완료", f"{_n_done}건", help=_done_help)
         st.caption(f"자동 {_n_auto_done} / 수동 {_n_manual_done}")
     with _m2:
-        st.metric("미배정", f"{_n_todo}건")
-        st.caption(_pcol_caption(_n_manual_p_todo, _n_no_use_todo, _n_rest_todo))
+        st.metric("미배정", f"{_n_rest_todo}건")
+        st.caption(_pcol_caption(_n_manual_p_todo, _n_no_use_todo, _n_todo))
     with _m3:
         st.metric(
-            "미확정", f"{_n_skip}건",
+            "미확정", f"{_n_rest_skip}건",
             help="분류 단계에서 정보 부족으로 분류 안 된 항목. "
                  "탭3 검수 큐의 '세부' 컬럼에서 사유를 확인하고 "
-                 "요청 엑셀을 정정한 뒤 사이드바의 '엑셀 데이터 다시 불러오기'를 누르면 재분류됩니다.",
+                 "요청 엑셀을 정정한 뒤 사이드바의 '엑셀 데이터 다시 불러오기'를 누르면 재분류됩니다. "
+                 "여기 숫자는 P열로도 처리 안 된 실제 미처리이며, 분류상 미확정 총계는 캡션의 '분류' 값입니다.",
         )
-        st.caption(_pcol_caption(_n_manual_p_skip, _n_no_use_skip, _n_rest_skip))
+        st.caption(_pcol_caption(_n_manual_p_skip, _n_no_use_skip, _n_skip))
     _m4.metric("검수 큐", f"{len(_review_rows)}건")
     _m5.metric("전체", f"{len(requests)}건")
 
@@ -1034,7 +1041,8 @@ with tab2:
 
     target_reqs = [r for r in requests
                    if r.category in (Category.ROOM_CHANGE, Category.ROOM_SPLIT)
-                   and compute_status(r, st.session_state.assignments, room_capacity) == "미배정"]
+                   and compute_status(r, st.session_state.assignments, room_capacity) == "미배정"
+                   and r.key not in _manual_keys]
 
     # 필터 적용된 미배정 목록
     filtered_targets = []
@@ -1496,16 +1504,17 @@ with tab3:
         st.metric("완료", f"{_n_done}건", help=_done_help)
         st.caption(f"자동 {_n_auto_done} / 수동 {_n_manual_done}")
     with _s2:
-        st.metric("미배정", f"{_n_todo}건")
-        st.caption(_pcol_caption(_n_manual_p_todo, _n_no_use_todo, _n_rest_todo))
+        st.metric("미배정", f"{_n_rest_todo}건")
+        st.caption(_pcol_caption(_n_manual_p_todo, _n_no_use_todo, _n_todo))
     with _s3:
         st.metric(
-            "미확정", f"{_n_skip}건",
+            "미확정", f"{_n_rest_skip}건",
             help="분류 단계에서 정보 부족으로 분류 안 된 항목. "
                  "아래 검수 큐의 '세부' 컬럼에서 사유를 확인하고 "
-                 "요청 엑셀을 정정한 뒤 사이드바의 '엑셀 데이터 다시 불러오기'를 누르면 재분류됩니다.",
+                 "요청 엑셀을 정정한 뒤 사이드바의 '엑셀 데이터 다시 불러오기'를 누르면 재분류됩니다. "
+                 "여기 숫자는 P열로도 처리 안 된 실제 미처리이며, 분류상 미확정 총계는 캡션의 '분류' 값입니다.",
         )
-        st.caption(_pcol_caption(_n_manual_p_skip, _n_no_use_skip, _n_rest_skip))
+        st.caption(_pcol_caption(_n_manual_p_skip, _n_no_use_skip, _n_skip))
     _s4.metric("검수 큐", f"{len(_review_rows)}건")
     _s5.metric("전체", f"{len(requests)}건")
 
